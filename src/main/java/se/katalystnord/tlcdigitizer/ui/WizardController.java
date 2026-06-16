@@ -226,6 +226,9 @@ public class WizardController {
         state.spots = SpotDetector.detect(state.corrected);
         IJ.showStatus("");
 
+        // Assign lane numbers (left-to-right, 1-indexed)
+        LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
+
         // Assign Rf values
         RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
 
