@@ -592,17 +592,56 @@ public class WizardController {
         int autoCount = spotsHolder[0].size();
         state.spots = new ArrayList<>(spotsHolder[0]);
 
-        // --- Part B: manual addition of missed spots ---
+        // --- Part B: remove false positives ---
         work.setRoi((ij.gui.Roi) null);
         IJ.setTool("multipoint");
-        work.setTitle("Add missed spots — " + autoCount + " auto-detected");
+        work.setTitle("Remove false spots — click inside unwanted circles");
+
+        WaitForUserDialog removeDlg = new WaitForUserDialog(
+            "TLC Digitizer — Step 5: Remove false positives",
+            state.spots.size() + " spots detected (yellow circles).\n\n" +
+            "Click inside any circle that is NOT a real spot\n" +
+            "(dirt, scratches, plate edges, etc.).\n" +
+            "The nearest detected spot to each click will be removed.\n\n" +
+            "Click OK immediately if nothing needs removing.");
+        removeDlg.show();
+
+        if (!removeDlg.escPressed()) {
+            ij.gui.Roi removeRoi = work.getRoi();
+            if (removeRoi instanceof PointRoi) {
+                FloatPolygon clicks = removeRoi.getFloatPolygon();
+                for (int i = 0; i < clicks.npoints; i++) {
+                    float cx = clicks.xpoints[i];
+                    float cy = clicks.ypoints[i];
+                    Spot nearest = null;
+                    float nearestDist = Float.MAX_VALUE;
+                    for (Spot s : state.spots) {
+                        float dx = cx - s.centroidX;
+                        float dy = cy - s.centroidY;
+                        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+                        // Only snap to spots within 3× their radius
+                        if (dist < nearestDist && dist < s.radius * 3f) {
+                            nearestDist = dist;
+                            nearest = s;
+                        }
+                    }
+                    if (nearest != null) state.spots.remove(nearest);
+                }
+            }
+            updateSpotOverlay(ov, work, state.spots);
+        }
+
+        // --- Part C: add missed spots ---
+        work.setRoi((ij.gui.Roi) null);
+        IJ.setTool("multipoint");
+        work.setTitle("Add missed spots — " + state.spots.size() + " remaining");
 
         WaitForUserDialog addDlg = new WaitForUserDialog(
             "TLC Digitizer — Step 5: Add missed spots",
-            autoCount + " spots auto-detected (yellow circles).\n\n" +
-            "Click on any missed spots with the Multipoint tool.\n" +
+            state.spots.size() + " spots remaining (yellow circles).\n\n" +
+            "Click on any real spots that were not detected.\n" +
             "Do NOT re-click already-circled spots.\n\n" +
-            "Click OK when done.");
+            "Click OK immediately if nothing needs adding.");
         addDlg.show();
 
         if (!addDlg.escPressed()) {
@@ -610,7 +649,8 @@ public class WizardController {
             if (clickedRoi instanceof PointRoi) {
                 FloatPolygon poly = clickedRoi.getFloatPolygon();
                 float meanRadius = meanSpotRadius(state.spots);
-                int nextId = state.spots.size();
+                int nextId = state.spots.isEmpty() ? 0
+                    : state.spots.stream().mapToInt(s -> s.id).max().getAsInt() + 1;
                 for (int i = 0; i < poly.npoints; i++) {
                     state.spots.add(new Spot(nextId++, poly.xpoints[i], poly.ypoints[i], meanRadius, height));
                 }
