@@ -6,6 +6,8 @@ import ij.gui.GenericDialog;
 import ij.gui.Line;
 import ij.gui.Overlay;
 import ij.gui.PointRoi;
+import ij.gui.WaitForUserDialog;
+import ij.process.FloatPolygon;
 import ij.plugin.frame.RoiManager;
 import se.katalystnord.tlcdigitizer.export.CsvExporter;
 import se.katalystnord.tlcdigitizer.model.AnalysisState;
@@ -82,24 +84,32 @@ public class WizardController {
         // Auto-detect corners
         state.corners = PerspectiveCorrection.detectCorners(state.grayscale);
 
-        // Show image with corner handles for user adjustment
-        ImagePlus work = new ImagePlus("Plate corners — adjust if needed", state.grayscale.duplicate());
-        Overlay ov = new Overlay();
-        PointRoi corners = new PointRoi(
-            new float[]{state.corners[0], state.corners[2], state.corners[4], state.corners[6]},
-            new float[]{state.corners[1], state.corners[3], state.corners[5], state.corners[7]},
-            4);
-        corners.setName("corners");
-        ov.add(corners);
-        work.setOverlay(ov);
+        // Show image and set the 4-point ROI as the active (draggable) ROI.
+        // Do NOT use an Overlay here — overlay ROIs are display-only and cannot
+        // be dragged by the user. The active ROI is what the Multipoint tool moves.
+        ImagePlus work = new ImagePlus("Plate corners — drag to correct", state.grayscale.duplicate());
         work.show();
+        setCornerRoi(work, state.corners);
         IJ.setTool("multipoint");
 
-        GenericDialog gd = new GenericDialog("TLC Digitizer — Step 2: Perspective");
-        gd.addMessage("Verify the four plate corners (TL, TR, BR, BL).\n" +
-                      "Drag the yellow points to correct any misplacement.\n" +
-                      "Click OK when the corners are correct.");
-        // Allow manual override via coordinate fields
+        // WaitForUserDialog floats alongside the image so the canvas stays interactive.
+        WaitForUserDialog wait = new WaitForUserDialog(
+            "TLC Digitizer — Step 2: Perspective",
+            "Drag the four yellow points to the plate corners.\n" +
+            "Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.\n\n" +
+            "Click OK when the corners are correct, or Cancel to abort.");
+        wait.show();
+        if (wait.escPressed()) {
+            work.close();
+            return false;
+        }
+
+        // Read dragged positions back from the active ROI (if user moved them)
+        readCornerRoi(work, state.corners);
+
+        // Numeric fine-tuning dialog
+        GenericDialog gd = new GenericDialog("TLC Digitizer — Step 2: Fine-tune corners");
+        gd.addMessage("Adjust corner coordinates if needed, then click OK.");
         gd.addNumericField("TL X:", state.corners[0], 1);
         gd.addNumericField("TL Y:", state.corners[1], 1);
         gd.addNumericField("TR X:", state.corners[2], 1);
@@ -109,7 +119,10 @@ public class WizardController {
         gd.addNumericField("BL X:", state.corners[6], 1);
         gd.addNumericField("BL Y:", state.corners[7], 1);
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) {
+            work.close();
+            return false;
+        }
 
         state.corners = new float[]{
             (float) gd.getNextNumber(), (float) gd.getNextNumber(),
@@ -126,6 +139,30 @@ public class WizardController {
         IJ.log("[Step 2] Perspective correction done. Output: " +
                state.corrected.getWidth() + "×" + state.corrected.getHeight());
         return true;
+    }
+
+    /** Sets the four corner positions as the active draggable PointRoi on {@code imp}. */
+    private static void setCornerRoi(ImagePlus imp, float[] corners) {
+        PointRoi roi = new PointRoi(
+            new float[]{corners[0], corners[2], corners[4], corners[6]},
+            new float[]{corners[1], corners[3], corners[5], corners[7]},
+            4);
+        imp.setRoi(roi);
+    }
+
+    /**
+     * Reads the current PointRoi from {@code imp} back into {@code corners}.
+     * If the ROI is missing or has the wrong point count, {@code corners} is unchanged.
+     */
+    private static void readCornerRoi(ImagePlus imp, float[] corners) {
+        ij.gui.Roi roi = imp.getRoi();
+        if (!(roi instanceof PointRoi)) return;
+        FloatPolygon poly = roi.getFloatPolygon();
+        if (poly.npoints != 4) return;
+        corners[0] = poly.xpoints[0]; corners[1] = poly.ypoints[0]; // TL
+        corners[2] = poly.xpoints[1]; corners[3] = poly.ypoints[1]; // TR
+        corners[4] = poly.xpoints[2]; corners[5] = poly.ypoints[2]; // BR
+        corners[6] = poly.xpoints[3]; corners[7] = poly.ypoints[3]; // BL
     }
 
     // -------------------------------------------------------------------------
