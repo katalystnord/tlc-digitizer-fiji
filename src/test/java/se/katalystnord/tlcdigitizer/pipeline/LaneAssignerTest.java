@@ -19,7 +19,7 @@ public class LaneAssignerTest {
 
     @Test
     public void singleSpot_assignedLane1() {
-        List<Spot> spots = List.of(spot(100, 100, 10));
+        List<Spot> spots = Arrays.asList(spot(100, 100, 10));
         LaneAssigner.assignLanes(spots, 400);
         assertEquals(1, spots.get(0).lane);
     }
@@ -99,12 +99,12 @@ public class LaneAssignerTest {
     @Test
     public void computeThreshold_usesLargerOfRadiusAndWidthFloor() {
         // radius=5 → 2×5=10; width=400 → 400×0.03=12 → threshold=12
-        List<Spot> spots = List.of(spot(100, 100, 5));
+        List<Spot> spots = Arrays.asList(spot(100, 100, 5));
         float t = LaneAssigner.computeThreshold(spots, 400);
         assertEquals(12f, t, 0.01f);
 
         // radius=20 → 2×20=40; width=400 → 12 → threshold=40
-        spots = List.of(spot(100, 100, 20));
+        spots = Arrays.asList(spot(100, 100, 20));
         t = LaneAssigner.computeThreshold(spots, 400);
         assertEquals(40f, t, 0.01f);
     }
