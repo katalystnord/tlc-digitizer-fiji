@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.scijava</groupId>
+    <artifactId>pom-scijava</artifactId>
+    <version>37.0.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>se.katalystnord</groupId>
+  <artifactId>tlc-digitizer</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>TLC Digitizer</name>
+  <description>Fiji/ImageJ plugin for quantitative TLC plate image analysis</description>
+  <url>https://github.com/katalystnord/tlc-digitizer-fiji</url>
+  <inceptionYear>2025</inceptionYear>
+
+  <organization>
+    <name>Katalyst Nord AB</name>
+    <url>https://katalystnord.se</url>
+  </organization>
+
+  <licenses>
+    <license>
+      <name>GNU General Public License v2+</name>
+      <url>https://www.gnu.org/licenses/gpl-2.0.html</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>dsandquist</id>
+      <name>David Sandquist</name>
+      <email>david@katalystnord.com</email>
+      <organization>Katalyst Nord AB</organization>
+      <roles>
+        <role>lead</role>
+        <role>developer</role>
+      </roles>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/katalystnord/tlc-digitizer-fiji</connection>
+    <developerConnection>scm:git:git@github.com:katalystnord/tlc-digitizer-fiji</developerConnection>
+    <tag>HEAD</tag>
+    <url>https://github.com/katalystnord/tlc-digitizer-fiji</url>
+  </scm>
+
+  <issueManagement>
+    <system>GitHub Issues</system>
+    <url>https://github.com/katalystnord/tlc-digitizer-fiji/issues</url>
+  </issueManagement>
+
+  <ciManagement>
+    <system>GitHub Actions</system>
+    <url>https://github.com/katalystnord/tlc-digitizer-fiji/actions</url>
+  </ciManagement>
+
+  <mailingLists>
+    <mailingList>
+      <name>None</name>
+    </mailingList>
+  </mailingLists>
+
+  <contributors>
+    <contributor>
+      <name>David Sandquist</name>
+      <email>david@katalystnord.com</email>
+      <organization>Katalyst Nord AB</organization>
+      <roles><role>developer</role></roles>
+    </contributor>
+  </contributors>
+
+  <properties>
+    <package-name>se.katalystnord.tlcdigitizer</package-name>
+    <main-class>se.katalystnord.tlcdigitizer.TlcDigitizerPlugin</main-class>
+    <license.licenseName>gpl_v2</license.licenseName>
+    <license.organizationName>Katalyst Nord AB</license.organizationName>
+    <license.copyrightOwners>David Sandquist, Katalyst Nord AB</license.copyrightOwners>
+    <!-- Java 11 — minimum for Fiji 2.x (2022+); Java 21 cannot cross-compile to 8 -->
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <maven.compiler.release>11</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <!-- ImageJ1 core — provided by Fiji at runtime -->
+    <dependency>
+      <groupId>net.imagej</groupId>
+      <artifactId>ij</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- ImageJ2 / SciJava — provided by Fiji at runtime -->
+    <dependency>
+      <groupId>net.imagej</groupId>
+      <artifactId>imagej</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- mpicbg perspective transforms — bundled with Fiji -->
+    <dependency>
+      <groupId>mpicbg</groupId>
+      <artifactId>mpicbg</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Commons Math for OLS regression and polynomial fitting — bundled with Fiji -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-math3</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Test dependencies -->
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>11</release>
+          <encoding>UTF-8</encoding>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <repositories>
+    <repository>
+      <id>scijava.public</id>
+      <url>https://maven.scijava.org/content/groups/public</url>
+    </repository>
+  </repositories>
+</project>
