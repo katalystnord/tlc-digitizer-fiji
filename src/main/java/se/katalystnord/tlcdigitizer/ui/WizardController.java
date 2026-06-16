@@ -9,6 +9,7 @@ import ij.gui.Overlay;
 import ij.gui.PointRoi;
 import ij.gui.WaitForUserDialog;
 import ij.process.FloatPolygon;
+import ij.process.FloatProcessor;
 import ij.plugin.frame.RoiManager;
 import se.katalystnord.tlcdigitizer.export.CsvExporter;
 import se.katalystnord.tlcdigitizer.model.AnalysisState;
@@ -441,62 +442,153 @@ public class WizardController {
         final int width  = state.corrected.getWidth();
         final int height = state.corrected.getHeight();
 
-        // Open the spot detection window; closes the background-corrected preview
         final ImagePlus work = new ImagePlus("Spot detection", state.corrected.duplicate());
         showDisplay(work);
         final Overlay ov = new Overlay();
         work.setOverlay(ov);
 
-        // Single-element array used as a mutable reference from anonymous inner classes
         final List<Spot>[] spotsHolder = new List[1];
-        spotsHolder[0] = SpotDetector.detect(state.corrected, 1.0f);
-        updateSpotOverlay(ov, work, spotsHolder[0]);
+        spotsHolder[0] = new ArrayList<>();
+        final StepResult[] panelResult = { StepResult.CANCEL };
 
-        // --- Part A: live threshold preview ---
-        final GenericDialog gd = new GenericDialog("TLC Digitizer — Step 5: Spot Detection");
-        gd.addMessage(
-            "Spots above the threshold are circled in yellow.\n" +
-            "Lower multiplier → more spots (dimmer included).\n" +
-            "Higher multiplier → fewer spots (brighter only).\n" +
-            "Use ↑ / ↓ to step by 0.1.");
-        gd.addNumericField("Threshold multiplier:", 1.0, 2);
-        gd.addCheckbox("← Back to Step 4 (re-mark origin and solvent front)", false);
+        // A modal JDialog creates an AWT secondary event loop — the image window
+        // can still repaint live while the dialog is open (unlike GenericDialog
+        // which sits on top and hides the image entirely).
+        final javax.swing.JDialog dlg = new javax.swing.JDialog(
+                (java.awt.Frame) null, "Step 5 — Spot Detection", true /* modal */);
+        dlg.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
 
-        final Vector<TextField> threshFields = gd.getNumericFields();
-        final TextField threshField = threshFields.get(0);
+        // Slider: value 10–500 represents multiplier 0.10–5.00
+        final javax.swing.JSlider slider = new javax.swing.JSlider(10, 500, 100);
+        slider.setMajorTickSpacing(100);
+        slider.setMinorTickSpacing(50);
+        slider.setPaintTicks(true);
+        slider.setPaintLabels(false);
 
-        final Runnable redetect = new Runnable() {
+        final javax.swing.JTextField multField = new javax.swing.JTextField("1.00", 5);
+        final javax.swing.JLabel countLabel = new javax.swing.JLabel(" ");
+        countLabel.setFont(countLabel.getFont().deriveFont(java.awt.Font.BOLD, 13f));
+
+        final javax.swing.JCheckBox invertBox = new javax.swing.JCheckBox(
+            "Invert — dark spots on bright background (UV254 / charring plates)");
+
+        final javax.swing.JButton backBtn    = new javax.swing.JButton("← Back");
+        final javax.swing.JButton confirmBtn = new javax.swing.JButton("Confirm →");
+
+        // Detection — runs on whatever thread calls it (EDT via secondary loop
+        // for slider/button events; plugin thread for the initial call)
+        final Runnable doDetect = new Runnable() {
             public void run() {
-                try {
-                    float mult = Float.parseFloat(threshField.getText().trim());
-                    if (mult > 0) {
-                        spotsHolder[0] = SpotDetector.detect(state.corrected, mult);
-                        updateSpotOverlay(ov, work, spotsHolder[0]);
-                    }
-                } catch (NumberFormatException ex) { /* mid-type, skip */ }
+                float mult = slider.getValue() / 100.0f;
+                FloatProcessor src = state.corrected;
+                if (invertBox.isSelected()) {
+                    src = (FloatProcessor) state.corrected.duplicate();
+                    src.invert();
+                }
+                List<Spot> found = SpotDetector.detect(src, mult);
+                spotsHolder[0] = found;
+                updateSpotOverlay(ov, work, found);
+                int n = found.size();
+                countLabel.setText(n + " spot" + (n == 1 ? "" : "s") + " detected");
             }
         };
 
-        gd.addDialogListener(new DialogListener() {
-            public boolean dialogItemChanged(GenericDialog d, AWTEvent e) {
-                redetect.run();
-                return true;
+        // Slider: update text while dragging, run detection on release
+        slider.addChangeListener(new javax.swing.event.ChangeListener() {
+            public void stateChanged(javax.swing.event.ChangeEvent e) {
+                multField.setText(String.format("%.2f", slider.getValue() / 100.0));
+                if (!slider.getValueIsAdjusting()) doDetect.run();
             }
         });
-        addArrowStepping(threshField, 0.1, 0.1, 10.0, redetect);
 
-        gd.showDialog();
-        if (gd.wasCanceled()) return StepResult.CANCEL;
+        // Text field: type an exact multiplier, press Enter to apply
+        multField.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                try {
+                    int v = (int) Math.round(Double.parseDouble(multField.getText().trim()) * 100);
+                    slider.setValue(Math.min(500, Math.max(10, v)));
+                    doDetect.run();
+                } catch (NumberFormatException ex) { /* ignore */ }
+            }
+        });
 
-        Checkbox backCheck5 = ((Vector<Checkbox>) gd.getCheckboxes()).get(0);
-        if (backCheck5.getState()) return StepResult.BACK;
+        invertBox.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) { doDetect.run(); }
+        });
+        confirmBtn.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                panelResult[0] = StepResult.CONTINUE;
+                dlg.dispose();
+            }
+        });
+        backBtn.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                panelResult[0] = StepResult.BACK;
+                dlg.dispose();
+            }
+        });
+        dlg.addWindowListener(new java.awt.event.WindowAdapter() {
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                panelResult[0] = StepResult.CANCEL;
+                dlg.dispose();
+            }
+        });
 
-        try {
-            state.thresholdFactor = Double.parseDouble(threshField.getText().trim());
-        } catch (NumberFormatException ex) {
-            state.thresholdFactor = 1.0;
+        // Layout
+        javax.swing.JPanel sliderRow = new javax.swing.JPanel(new java.awt.BorderLayout(6, 0));
+        sliderRow.add(new javax.swing.JLabel("0.1×"), java.awt.BorderLayout.WEST);
+        sliderRow.add(slider, java.awt.BorderLayout.CENTER);
+        sliderRow.add(new javax.swing.JLabel("5×"), java.awt.BorderLayout.EAST);
+
+        javax.swing.JPanel fieldRow = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        fieldRow.add(new javax.swing.JLabel("Multiplier:"));
+        fieldRow.add(multField);
+        fieldRow.add(new javax.swing.JLabel("  ← type and press Enter"));
+
+        javax.swing.JPanel main = new javax.swing.JPanel();
+        main.setLayout(new javax.swing.BoxLayout(main, javax.swing.BoxLayout.Y_AXIS));
+        main.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 14, 8, 14));
+        main.add(new javax.swing.JLabel(
+            "<html><b>Drag the slider</b> — yellow circles show detected spots on the image.<br>" +
+            "Lower multiplier = include dimmer spots &nbsp;|&nbsp; Higher = brighter spots only</html>"));
+        main.add(javax.swing.Box.createVerticalStrut(10));
+        main.add(sliderRow);
+        main.add(javax.swing.Box.createVerticalStrut(4));
+        main.add(fieldRow);
+        main.add(javax.swing.Box.createVerticalStrut(8));
+        main.add(countLabel);
+        main.add(javax.swing.Box.createVerticalStrut(10));
+        main.add(invertBox);
+
+        javax.swing.JPanel btnRow = new javax.swing.JPanel(
+                new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
+        btnRow.add(backBtn);
+        btnRow.add(confirmBtn);
+
+        dlg.getContentPane().add(main, java.awt.BorderLayout.CENTER);
+        dlg.getContentPane().add(btnRow, java.awt.BorderLayout.SOUTH);
+        dlg.pack();
+        dlg.setMinimumSize(new java.awt.Dimension(380, 0));
+
+        // Try to place the dialog to the right of the image window
+        java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        if (work.getWindow() != null) {
+            java.awt.Rectangle wr = work.getWindow().getBounds();
+            int x = wr.x + wr.width + 8;
+            if (x + dlg.getWidth() > screen.width) x = screen.width - dlg.getWidth() - 8;
+            dlg.setLocation(Math.max(0, x), wr.y);
+        } else {
+            dlg.setLocationRelativeTo(null);
         }
 
+        // Run initial detection, then show the dialog (blocks until user acts)
+        doDetect.run();
+        dlg.setVisible(true);
+
+        if (panelResult[0] != StepResult.CONTINUE) return panelResult[0];
+
+        state.thresholdFactor = slider.getValue() / 100.0;
         int autoCount = spotsHolder[0].size();
         state.spots = new ArrayList<>(spotsHolder[0]);
 
@@ -525,7 +617,7 @@ public class WizardController {
             }
         }
 
-        // --- Pipeline: assign lanes, Rf, integrate, Option B correction ---
+        // --- Pipeline ---
         LaneAssigner.assignLanes(state.spots, width);
         RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
         SpotIntegrator.integrateAll(state.corrected, state.spots);
@@ -535,11 +627,9 @@ public class WizardController {
             BackgroundCorrection.applyPerSpotPolynomial(
                 state.spots, state.corrected, BackgroundCorrection.DEFAULT_SG_DEGREE);
             IJ.showStatus("");
-            IJ.log("[Step 5] Per-spot polynomial background correction applied (degree " +
-                   BackgroundCorrection.DEFAULT_SG_DEGREE + ").");
+            IJ.log("[Step 5] Per-spot polynomial background correction applied.");
         }
 
-        // Show final overlay with all spots (auto + manually added)
         updateSpotOverlay(ov, work, state.spots);
         work.setTitle("Detected spots (" + state.spots.size() + ")");
         IJ.log("[Step 5] " + state.spots.size() + " spots total (auto: " + autoCount +
