@@ -57,29 +57,54 @@ public class WizardController {
         imp.show();
     }
 
-    /** Runs all 7 steps in sequence. Returns false if the user cancels at any step. */
+    /** Return value from each wizard step. */
+    private enum StepResult { CONTINUE, BACK, CANCEL }
+
+    /**
+     * Runs the 7-step wizard with forward/back navigation.
+     * Returns false if the user cancels at any step.
+     */
     public boolean run() {
-        return step1_prepare()
-            && step2_perspectiveCorrection()
-            && step3_backgroundCorrection()
-            && step4_markOriginAndFront()
-            && step5_spotDetection()
-            && step6_calibration()
-            && step7_export();
+        int step = 1;
+        while (step >= 1 && step <= 7) {
+            StepResult result;
+            switch (step) {
+                case 1:  result = step1_prepare();              break;
+                case 2:  result = step2_perspectiveCorrection(); break;
+                case 3:  result = step3_backgroundCorrection(); break;
+                case 4:  result = step4_markOriginAndFront();   break;
+                case 5:  result = step5_spotDetection();        break;
+                case 6:  result = step6_calibration();          break;
+                case 7:  result = step7_export();               break;
+                default: return false;
+            }
+            if (result == StepResult.CANCEL) return false;
+            if (result == StepResult.BACK) {
+                // Close the current step's display before re-entering the previous one
+                if (currentDisplay != null && currentDisplay.isVisible()) {
+                    currentDisplay.close();
+                    currentDisplay = null;
+                }
+                step = Math.max(1, step - 1);
+            } else {
+                step++;
+            }
+        }
+        return true;
     }
 
     // -------------------------------------------------------------------------
     // Step 1: Image preparation
     // -------------------------------------------------------------------------
 
-    boolean step1_prepare() {
+    StepResult step1_prepare() {
         GenericDialog gd = new GenericDialog("TLC Digitizer — Step 1: Image");
         gd.addMessage("Convert the image to grayscale.\n" +
                       "For UV-fluorescence images, try 'Green channel'.");
         String[] methods = {"Luminance (Y = 0.2126R + 0.7152G + 0.0722B)", "Green channel only"};
         gd.addChoice("Conversion method:", methods, methods[0]);
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) return StepResult.CANCEL;
 
         boolean useGreen = gd.getNextChoiceIndex() == 1;
         if (useGreen) {
@@ -92,43 +117,58 @@ public class WizardController {
         showDisplay(preview);
         IJ.log("[Step 1] Grayscale conversion done. Size: " +
                state.grayscale.getWidth() + "×" + state.grayscale.getHeight());
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
     // Step 2: Perspective correction
     // -------------------------------------------------------------------------
 
-    boolean step2_perspectiveCorrection() {
+    StepResult step2_perspectiveCorrection() {
         // Auto-detect corners
         state.corners = PerspectiveCorrection.detectCorners(state.grayscale);
 
         // Show image and set the 4-point ROI as the active (draggable) ROI.
-        // Do NOT use an Overlay here — overlay ROIs are display-only and cannot
-        // be dragged by the user. The active ROI is what the Multipoint tool moves.
+        // Use showDisplay so this replaces the grayscale preview (no extra window).
         ImagePlus work = new ImagePlus("Plate corners — drag to correct", state.grayscale.duplicate());
-        work.show();
-        setCornerRoi(work, state.corners);
+        showDisplay(work); // closes grayscale preview
         IJ.setTool("multipoint");
 
-        // WaitForUserDialog floats alongside the image so the canvas stays interactive.
-        WaitForUserDialog wait = new WaitForUserDialog(
-            "TLC Digitizer — Step 2: Perspective",
-            "Drag the four yellow points to the plate corners.\n" +
-            "Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.\n\n" +
-            "Click OK when the corners are correct, or Cancel to abort.");
-        wait.show();
-        if (wait.escPressed()) {
-            work.close();
-            return false;
-        }
+        // Interactive corner dragging — retry loop handles accidental extra clicks.
+        while (true) {
+            setCornerRoi(work, state.corners);
+            WaitForUserDialog wait = new WaitForUserDialog(
+                "TLC Digitizer — Step 2: Perspective",
+                "Drag the four yellow points to the plate corners.\n" +
+                "Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.\n" +
+                "Ctrl+Z undoes an accidental click.\n\n" +
+                "Click OK when the corners are correct, or Cancel to abort.");
+            wait.show();
+            if (wait.escPressed()) {
+                work.close();
+                return StepResult.CANCEL;
+            }
 
-        // Read dragged positions back from the active ROI (if user moved them)
-        readCornerRoi(work, state.corners);
+            ij.gui.Roi roi = work.getRoi();
+            if (roi instanceof PointRoi) {
+                FloatPolygon poly = roi.getFloatPolygon();
+                if (poly.npoints == 4) {
+                    readCornerRoi(work, state.corners);
+                    break; // correct number of points
+                }
+                // Wrong count — tell user and let them try again
+                IJ.showMessage("Step 2",
+                    "Found " + poly.npoints + " corner points — need exactly 4.\n" +
+                    "Use Ctrl+Z to undo any accidental clicks, then click OK again.");
+            } else {
+                break; // no ROI changed — use auto-detected corners
+            }
+        }
 
         // Numeric fine-tuning dialog
         GenericDialog gd = new GenericDialog("TLC Digitizer — Step 2: Fine-tune corners");
-        gd.addMessage("Adjust corner coordinates if needed, then click OK.");
+        gd.addMessage("Adjust corner coordinates if needed, then click OK.\n" +
+                      "Tick 'Back' to return to Step 1 (grayscale conversion).");
         gd.addNumericField("TL X:", state.corners[0], 1);
         gd.addNumericField("TL Y:", state.corners[1], 1);
         gd.addNumericField("TR X:", state.corners[2], 1);
@@ -137,10 +177,11 @@ public class WizardController {
         gd.addNumericField("BR Y:", state.corners[5], 1);
         gd.addNumericField("BL X:", state.corners[6], 1);
         gd.addNumericField("BL Y:", state.corners[7], 1);
+        gd.addCheckbox("← Back to Step 1", false);
         gd.showDialog();
         if (gd.wasCanceled()) {
             work.close();
-            return false;
+            return StepResult.CANCEL;
         }
 
         state.corners = new float[]{
@@ -149,15 +190,16 @@ public class WizardController {
             (float) gd.getNextNumber(), (float) gd.getNextNumber(),
             (float) gd.getNextNumber(), (float) gd.getNextNumber()
         };
-
+        boolean backToStep1 = gd.getNextBoolean();
         work.close();
+        if (backToStep1) return StepResult.BACK;
 
         state.corrected = PerspectiveCorrection.warpImage(state.grayscale, state.corners);
         ImagePlus corrPreview = new ImagePlus("Corrected plate", state.corrected.duplicate());
-        showDisplay(corrPreview); // closes grayscale preview
+        showDisplay(corrPreview);
         IJ.log("[Step 2] Perspective correction done. Output: " +
                state.corrected.getWidth() + "×" + state.corrected.getHeight());
-        return true;
+        return StepResult.CONTINUE;
     }
 
     /** Sets the four corner positions as the active draggable PointRoi on {@code imp}. */
@@ -188,49 +230,52 @@ public class WizardController {
     // Step 3: Background correction
     // -------------------------------------------------------------------------
 
-    boolean step3_backgroundCorrection() {
+    StepResult step3_backgroundCorrection() {
         GenericDialog gd = new GenericDialog("TLC Digitizer — Step 3: Background");
         gd.addMessage("Select background correction method.\n" +
                       "Option A (quartic polynomial) is recommended for most plates.\n" +
                       "Option B (Savitzky-Golay) is better for non-uniform charring.");
         String[] methods = {"A — Quartic polynomial (recommended)", "B — Savitzky-Golay"};
         gd.addChoice("Method:", methods, methods[0]);
+        gd.addCheckbox("← Back to Step 2 (perspective correction)", false);
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) return StepResult.CANCEL;
 
         int method = gd.getNextChoiceIndex();
+        boolean backToStep2 = gd.getNextBoolean();
+        if (backToStep2) return StepResult.BACK;
+
         state.usedPolynomialBackground = (method == 0);
 
         IJ.showStatus("Fitting background model…");
         if (state.usedPolynomialBackground) {
             state.corrected = BackgroundCorrection.fitAndSubtract(state.corrected);
         } else {
-            // Option B (per-spot polynomial) runs after spot detection in Step 5.
-            // No global image correction here — just log and continue.
             IJ.log("[Step 3] Per-spot polynomial (Option B) deferred to integration step.");
         }
         IJ.showStatus("");
 
         ImagePlus bgPreview = new ImagePlus("Background corrected", state.corrected.duplicate());
-        showDisplay(bgPreview); // closes corrected-plate preview
+        showDisplay(bgPreview);
         IJ.log("[Step 3] Background correction done.");
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
     // Step 4: Mark origin and solvent front
     // -------------------------------------------------------------------------
 
-    boolean step4_markOriginAndFront() {
+    StepResult step4_markOriginAndFront() {
         final int width  = state.corrected.getWidth();
         final int height = state.corrected.getHeight();
 
+        // Use showDisplay so the background-corrected preview is replaced, not stacked.
         final ImagePlus work = new ImagePlus("Mark origin and solvent front", state.corrected.duplicate());
         final Overlay ov = new Overlay();
         work.setOverlay(ov);
-        work.show();
+        showDisplay(work); // closes background-corrected preview
 
-        // Build dialog with two numeric fields
+        // Build dialog with two numeric fields + Back checkbox
         final GenericDialog gd = new GenericDialog("TLC Digitizer — Step 4: Rf Reference Lines");
         gd.addMessage(
             "Red line = origin (spotting point)     Blue line = solvent front\n" +
@@ -238,16 +283,15 @@ public class WizardController {
             "Type a value or use ↑ / ↓ arrow keys to step by 0.005.");
         gd.addNumericField("Origin Y fraction (0–1):", 0.90, 3);
         gd.addNumericField("Solvent front Y fraction (0–1):", 0.10, 3);
+        gd.addCheckbox("← Back to Step 3 (background correction)", false);
 
         @SuppressWarnings("unchecked")
         final Vector<TextField> fields = gd.getNumericFields();
         final TextField originField = fields.get(0);
         final TextField frontField  = fields.get(1);
 
-        // Draw initial lines before the dialog appears
         drawRfLines(ov, work, width, height, 0.90f, 0.10f);
 
-        // Live-update lines whenever either field changes
         gd.addDialogListener(new DialogListener() {
             public boolean dialogItemChanged(GenericDialog d, AWTEvent e) {
                 liveUpdateRfLines(originField, frontField, ov, work, width, height);
@@ -255,7 +299,6 @@ public class WizardController {
             }
         });
 
-        // Arrow-key stepping (↑ adds 0.005, ↓ subtracts 0.005)
         final double STEP = 0.005;
         addArrowStepping(originField, STEP, new Runnable() {
             public void run() { liveUpdateRfLines(originField, frontField, ov, work, width, height); }
@@ -265,25 +308,30 @@ public class WizardController {
         });
 
         gd.showDialog();
-        work.close();
-        if (gd.wasCanceled()) return false;
+        // work stays open as the currentDisplay; step 5's showDisplay will replace it.
+        if (gd.wasCanceled()) return StepResult.CANCEL;
 
-        // Read final values directly from the text fields for reliability
+        // Read Back checkbox directly (GenericDialog.getNextBoolean() order not reliable here
+        // because we skipped getNextNumber() for the live-preview fields).
+        @SuppressWarnings("unchecked")
+        Checkbox backCheck4 = ((Vector<Checkbox>) gd.getCheckboxes()).get(0);
+        if (backCheck4.getState()) return StepResult.BACK;
+
         try {
             state.originYFraction = clamp01(Float.parseFloat(originField.getText().trim()));
             state.frontYFraction  = clamp01(Float.parseFloat(frontField.getText().trim()));
         } catch (NumberFormatException e) {
             IJ.error("Invalid Y fraction value — please enter a number between 0 and 1.");
-            return false;
+            return StepResult.CANCEL;
         }
 
         if (state.originYFraction <= state.frontYFraction) {
             IJ.error("Origin must be below the solvent front (origin Y > front Y).");
-            return false;
+            return StepResult.CANCEL;
         }
 
         IJ.log("[Step 4] Origin=" + state.originYFraction + " Front=" + state.frontYFraction);
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
@@ -389,7 +437,7 @@ public class WizardController {
     // -------------------------------------------------------------------------
 
     @SuppressWarnings("unchecked")
-    boolean step5_spotDetection() {
+    StepResult step5_spotDetection() {
         final int width  = state.corrected.getWidth();
         final int height = state.corrected.getHeight();
 
@@ -412,6 +460,7 @@ public class WizardController {
             "Higher multiplier → fewer spots (brighter only).\n" +
             "Use ↑ / ↓ to step by 0.1.");
         gd.addNumericField("Threshold multiplier:", 1.0, 2);
+        gd.addCheckbox("← Back to Step 4 (re-mark origin and solvent front)", false);
 
         final Vector<TextField> threshFields = gd.getNumericFields();
         final TextField threshField = threshFields.get(0);
@@ -437,7 +486,10 @@ public class WizardController {
         addArrowStepping(threshField, 0.1, 0.1, 10.0, redetect);
 
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) return StepResult.CANCEL;
+
+        Checkbox backCheck5 = ((Vector<Checkbox>) gd.getCheckboxes()).get(0);
+        if (backCheck5.getState()) return StepResult.BACK;
 
         try {
             state.thresholdFactor = Double.parseDouble(threshField.getText().trim());
@@ -492,20 +544,22 @@ public class WizardController {
         work.setTitle("Detected spots (" + state.spots.size() + ")");
         IJ.log("[Step 5] " + state.spots.size() + " spots total (auto: " + autoCount +
                ", manual: " + (state.spots.size() - autoCount) + ").");
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
     // Step 6: Calibration
     // -------------------------------------------------------------------------
 
-    boolean step6_calibration() {
+    StepResult step6_calibration() {
         if (state.spots.isEmpty()) {
-            IJ.error("No spots to calibrate.");
-            return false;
+            IJ.error("No spots detected. Going back to Step 5 to adjust the threshold.");
+            return StepResult.BACK;
         }
 
-        // Build a numbered list of spots for the user to assign references
+        // Reset reference flags so re-entries don't accumulate
+        for (Spot s : state.spots) { s.isReference = false; s.referenceConcentration = 0; }
+
         StringBuilder sb = new StringBuilder("Spot ID  Rf      Integration\n");
         for (Spot s : state.spots) {
             sb.append(String.format("  %3d   %.3f   %.2f%n", s.id, s.rfValue, s.integrationValue));
@@ -522,28 +576,36 @@ public class WizardController {
             gd.addNumericField("Spot ID for ref " + (i + 1) + ":", -1, 0);
             gd.addNumericField("Concentration (µg/mL):", 0.0, 4);
         }
+        gd.addCheckbox("← Back to Step 5 (redo spot detection)", false);
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) return StepResult.CANCEL;
+
+        // Read all numeric fields first, then check Back before mutating state
+        int[] ids    = new int[rows];
+        double[] concs = new double[rows];
+        for (int i = 0; i < rows; i++) {
+            ids[i]   = (int) gd.getNextNumber();
+            concs[i] = gd.getNextNumber();
+        }
+        boolean backToStep5 = gd.getNextBoolean();
+        if (backToStep5) return StepResult.BACK;
 
         // Mark reference spots
         for (int i = 0; i < rows; i++) {
-            int id = (int) gd.getNextNumber();
-            double conc = gd.getNextNumber();
-            if (id >= 0 && conc > 0) {
+            final int fid = ids[i];
+            final double fconc = concs[i];
+            if (fid >= 0 && fconc > 0) {
                 state.spots.stream()
-                    .filter(s -> s.id == id)
+                    .filter(s -> s.id == fid)
                     .findFirst()
-                    .ifPresent(s -> {
-                        s.isReference = true;
-                        s.referenceConcentration = conc;
-                    });
+                    .ifPresent(s -> { s.isReference = true; s.referenceConcentration = fconc; });
             }
         }
 
         List<Spot> refs = state.spots.stream().filter(s -> s.isReference).collect(Collectors.toList());
         if (refs.size() < 3) {
             IJ.error("At least 3 reference spots are required. Only " + refs.size() + " assigned.");
-            return false;
+            return StepResult.CANCEL;
         }
 
         try {
@@ -552,34 +614,37 @@ public class WizardController {
             IJ.log("[Step 6] " + state.calibrationModel.toSummary());
         } catch (IllegalArgumentException e) {
             IJ.error("Calibration failed: " + e.getMessage());
-            return false;
+            return StepResult.CANCEL;
         }
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
     // Step 7: Export
     // -------------------------------------------------------------------------
 
-    boolean step7_export() {
+    StepResult step7_export() {
         GenericDialog gd = new GenericDialog("TLC Digitizer — Step 7: Export");
         gd.addMessage("Save results to CSV.");
         gd.addStringField("Output file:", System.getProperty("user.home") + "/tlc_results.csv", 40);
+        gd.addCheckbox("← Back to Step 6 (redo calibration)", false);
         gd.showDialog();
-        if (gd.wasCanceled()) return false;
+        if (gd.wasCanceled()) return StepResult.CANCEL;
 
         String path = gd.getNextString().trim();
-        File out = new File(path);
+        boolean backToStep6 = gd.getNextBoolean();
+        if (backToStep6) return StepResult.BACK;
 
+        File out = new File(path);
         try {
             CsvExporter.export(state, out);
             IJ.log("[Step 7] Results saved to: " + out.getAbsolutePath());
             IJ.showMessage("TLC Digitizer", "Results saved to:\n" + out.getAbsolutePath());
         } catch (IOException e) {
             IJ.error("Export failed: " + e.getMessage());
-            return false;
+            return StepResult.CANCEL;
         }
-        return true;
+        return StepResult.CONTINUE;
     }
 
     // -------------------------------------------------------------------------
