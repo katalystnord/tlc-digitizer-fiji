@@ -2,6 +2,7 @@ package se.katalystnord.tlcdigitizer.ui;
 
 import ij.IJ;
 import ij.ImagePlus;
+import ij.gui.DialogListener;
 import ij.gui.GenericDialog;
 import ij.gui.Line;
 import ij.gui.Overlay;
@@ -15,9 +16,12 @@ import se.katalystnord.tlcdigitizer.model.Spot;
 import se.katalystnord.tlcdigitizer.pipeline.*;
 
 import java.awt.*;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.Vector;
 import java.util.stream.Collectors;
 
 /**
@@ -203,46 +207,137 @@ public class WizardController {
     // -------------------------------------------------------------------------
 
     boolean step4_markOriginAndFront() {
-        int height = state.corrected.getHeight();
-        int width = state.corrected.getWidth();
+        final int width  = state.corrected.getWidth();
+        final int height = state.corrected.getHeight();
 
-        // Guess: origin at 90% of height, front at 10% of height
-        float defaultOrigin = 0.90f;
-        float defaultFront = 0.10f;
-
-        ImagePlus work = new ImagePlus("Mark origin and solvent front", state.corrected.duplicate());
-        Overlay ov = new Overlay();
-        Line originLine = new Line(0, (int) (defaultOrigin * height), width, (int) (defaultOrigin * height));
-        originLine.setName("origin");
-        originLine.setStrokeColor(Color.RED);
-        Line frontLine = new Line(0, (int) (defaultFront * height), width, (int) (defaultFront * height));
-        frontLine.setName("front");
-        frontLine.setStrokeColor(Color.BLUE);
-        ov.add(originLine);
-        ov.add(frontLine);
+        final ImagePlus work = new ImagePlus("Mark origin and solvent front", state.corrected.duplicate());
+        final Overlay ov = new Overlay();
         work.setOverlay(ov);
         work.show();
 
-        GenericDialog gd = new GenericDialog("TLC Digitizer — Step 4: Rf Reference Lines");
-        gd.addMessage("Enter the Y positions of the origin (application point) and solvent front\n" +
-                      "as fractions of the image height (0.0 = top, 1.0 = bottom).\n" +
-                      "Red line = origin, Blue line = solvent front.");
-        gd.addNumericField("Origin Y fraction (0–1):", defaultOrigin, 3);
-        gd.addNumericField("Solvent front Y fraction (0–1):", defaultFront, 3);
+        // Build dialog with two numeric fields
+        final GenericDialog gd = new GenericDialog("TLC Digitizer — Step 4: Rf Reference Lines");
+        gd.addMessage(
+            "Red line = origin (spotting point)     Blue line = solvent front\n" +
+            "Y fraction: 0.0 = top of image, 1.0 = bottom.\n" +
+            "Type a value or use ↑ / ↓ arrow keys to step by 0.005.");
+        gd.addNumericField("Origin Y fraction (0–1):", 0.90, 3);
+        gd.addNumericField("Solvent front Y fraction (0–1):", 0.10, 3);
+
+        @SuppressWarnings("unchecked")
+        final Vector<TextField> fields = gd.getNumericFields();
+        final TextField originField = fields.get(0);
+        final TextField frontField  = fields.get(1);
+
+        // Draw initial lines before the dialog appears
+        drawRfLines(ov, work, width, height, 0.90f, 0.10f);
+
+        // Live-update lines whenever either field changes
+        gd.addDialogListener(new DialogListener() {
+            public boolean dialogItemChanged(GenericDialog d, AWTEvent e) {
+                liveUpdateRfLines(originField, frontField, ov, work, width, height);
+                return true;
+            }
+        });
+
+        // Arrow-key stepping (↑ adds 0.005, ↓ subtracts 0.005)
+        final double STEP = 0.005;
+        addArrowStepping(originField, STEP, new Runnable() {
+            public void run() { liveUpdateRfLines(originField, frontField, ov, work, width, height); }
+        });
+        addArrowStepping(frontField, STEP, new Runnable() {
+            public void run() { liveUpdateRfLines(originField, frontField, ov, work, width, height); }
+        });
+
         gd.showDialog();
+        work.close();
         if (gd.wasCanceled()) return false;
 
-        state.originYFraction = (float) gd.getNextNumber();
-        state.frontYFraction = (float) gd.getNextNumber();
+        // Read final values directly from the text fields for reliability
+        try {
+            state.originYFraction = clamp01(Float.parseFloat(originField.getText().trim()));
+            state.frontYFraction  = clamp01(Float.parseFloat(frontField.getText().trim()));
+        } catch (NumberFormatException e) {
+            IJ.error("Invalid Y fraction value — please enter a number between 0 and 1.");
+            return false;
+        }
 
         if (state.originYFraction <= state.frontYFraction) {
             IJ.error("Origin must be below the solvent front (origin Y > front Y).");
             return false;
         }
 
-        work.close();
         IJ.log("[Step 4] Origin=" + state.originYFraction + " Front=" + state.frontYFraction);
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 4 helpers
+    // -------------------------------------------------------------------------
+
+    private static float clamp01(float v) {
+        return Math.max(0f, Math.min(1f, v));
+    }
+
+    /** Redraws both reference lines on the overlay and refreshes the image. */
+    private static void drawRfLines(Overlay ov, ImagePlus work,
+                                    int width, int height,
+                                    float originFrac, float frontFrac) {
+        ov.clear();
+
+        int oy = Math.min(height - 1, (int) (originFrac * height));
+        Line originLine = new Line(0, oy, width - 1, oy);
+        originLine.setStrokeColor(Color.RED);
+        originLine.setStrokeWidth(2.0);
+        originLine.setName("origin");
+
+        int fy = Math.min(height - 1, (int) (frontFrac * height));
+        Line frontLine = new Line(0, fy, width - 1, fy);
+        frontLine.setStrokeColor(Color.BLUE);
+        frontLine.setStrokeWidth(2.0);
+        frontLine.setName("front");
+
+        ov.add(originLine);
+        ov.add(frontLine);
+        work.updateAndDraw();
+    }
+
+    /** Parses the two text fields and redraws lines; silently ignores partially-typed values. */
+    private static void liveUpdateRfLines(TextField originField, TextField frontField,
+                                          Overlay ov, ImagePlus work, int width, int height) {
+        try {
+            float o = clamp01(Float.parseFloat(originField.getText().trim()));
+            float f = clamp01(Float.parseFloat(frontField.getText().trim()));
+            drawRfLines(ov, work, width, height, o, f);
+        } catch (NumberFormatException e) {
+            // user is mid-type — don't update
+        }
+    }
+
+    /**
+     * Adds a KeyListener to {@code field} so that ↑ adds {@code step} and ↓
+     * subtracts {@code step}, clamped to [0, 1], then calls {@code onChange}.
+     */
+    private static void addArrowStepping(final TextField field,
+                                         final double step,
+                                         final Runnable onChange) {
+        field.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                int code = e.getKeyCode();
+                if (code != KeyEvent.VK_UP && code != KeyEvent.VK_DOWN) return;
+                try {
+                    double val = Double.parseDouble(field.getText().trim());
+                    val += (code == KeyEvent.VK_UP ? step : -step);
+                    val = Math.max(0.0, Math.min(1.0, val));
+                    field.setText(String.format("%.3f", val));
+                    onChange.run();
+                    e.consume();
+                } catch (NumberFormatException ex) {
+                    // ignore
+                }
+            }
+        });
     }
 
     // -------------------------------------------------------------------------
