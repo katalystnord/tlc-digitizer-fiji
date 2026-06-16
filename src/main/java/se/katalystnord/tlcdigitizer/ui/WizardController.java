@@ -447,16 +447,18 @@ public class WizardController {
         final Overlay ov = new Overlay();
         work.setOverlay(ov);
 
+        // Give AWT time to create the image canvas before we attach a mouse listener
+        IJ.wait(150);
+        final ij.gui.ImageCanvas canvas = work.getCanvas();
+
         final List<Spot>[] spotsHolder = new List[1];
         spotsHolder[0] = new ArrayList<>();
         final StepResult[] panelResult = { StepResult.CANCEL };
 
-        // A modal JDialog creates an AWT secondary event loop — the image window
-        // can still repaint live while the dialog is open (unlike GenericDialog
-        // which sits on top and hides the image entirely).
-        final javax.swing.JDialog dlg = new javax.swing.JDialog(
-                (java.awt.Frame) null, "Step 5 — Spot Detection", true /* modal */);
-        dlg.setDefaultCloseOperation(javax.swing.JDialog.DO_NOTHING_ON_CLOSE);
+        // Non-modal JFrame: the image canvas stays fully interactive so the user
+        // can left/right-click to add or remove spots while the panel is open.
+        final javax.swing.JFrame dlg = new javax.swing.JFrame("Step 5 — Spot Detection");
+        dlg.setDefaultCloseOperation(javax.swing.JFrame.DO_NOTHING_ON_CLOSE);
 
         // Slider: value 10–500 represents multiplier 0.10–5.00
         final javax.swing.JSlider slider = new javax.swing.JSlider(10, 500, 100);
@@ -475,25 +477,35 @@ public class WizardController {
         final javax.swing.JButton backBtn    = new javax.swing.JButton("← Back");
         final javax.swing.JButton confirmBtn = new javax.swing.JButton("Confirm →");
 
-        // Detection — runs on whatever thread calls it (EDT via secondary loop
-        // for slider/button events; plugin thread for the initial call)
+        // Blocks the calling thread while the AWT event loop continues running
+        final WaitHandle waitHandle = makeWaitHandle();
+
+        // Refresh overlay and count label after any change to the spot list
+        final Runnable refreshOverlay = new Runnable() {
+            public void run() {
+                updateSpotOverlay(ov, work, spotsHolder[0]);
+                int n = spotsHolder[0].size();
+                countLabel.setText(n + " spot" + (n == 1 ? "" : "s") +
+                    " — left-click image to add, right-click to remove");
+            }
+        };
+
+        // Re-run auto-detection; replaces the full spot list (clears manual edits)
         final Runnable doDetect = new Runnable() {
             public void run() {
                 float mult = slider.getValue() / 100.0f;
+                multField.setText(String.format("%.2f", mult));
                 FloatProcessor src = state.corrected;
                 if (invertBox.isSelected()) {
                     src = (FloatProcessor) state.corrected.duplicate();
                     src.invert();
                 }
-                List<Spot> found = SpotDetector.detect(src, mult);
-                spotsHolder[0] = found;
-                updateSpotOverlay(ov, work, found);
-                int n = found.size();
-                countLabel.setText(n + " spot" + (n == 1 ? "" : "s") + " detected");
+                spotsHolder[0] = SpotDetector.detect(src, mult);
+                refreshOverlay.run();
             }
         };
 
-        // Slider: update text while dragging, run detection on release
+        // Slider: update text while dragging; re-detect on release
         slider.addChangeListener(new javax.swing.event.ChangeListener() {
             public void stateChanged(javax.swing.event.ChangeEvent e) {
                 multField.setText(String.format("%.2f", slider.getValue() / 100.0));
@@ -501,7 +513,7 @@ public class WizardController {
             }
         });
 
-        // Text field: type an exact multiplier, press Enter to apply
+        // Text field: type exact multiplier, press Enter to apply
         multField.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 try {
@@ -515,22 +527,68 @@ public class WizardController {
         invertBox.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) { doDetect.run(); }
         });
+
+        // Canvas mouse listener: left-click = add spot, right-click = remove nearest
+        final java.awt.event.MouseAdapter spotEditor = new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (canvas == null) return;
+                // Convert from canvas screen coords to image pixel coords (accounts for zoom)
+                int imgX = canvas.offScreenX(e.getX());
+                int imgY = canvas.offScreenY(e.getY());
+
+                if (javax.swing.SwingUtilities.isLeftMouseButton(e)) {
+                    // Add: locally-thresholded spot at the click position
+                    FloatProcessor src = state.corrected;
+                    if (invertBox.isSelected()) {
+                        src = (FloatProcessor) state.corrected.duplicate();
+                        src.invert();
+                    }
+                    Spot found = SpotDetector.detectAtPoint(src, imgX, imgY, height);
+                    int nextId = spotsHolder[0].isEmpty() ? 0
+                        : spotsHolder[0].stream().mapToInt(s -> s.id).max().getAsInt() + 1;
+                    spotsHolder[0].add(new Spot(nextId, found.centroidX, found.centroidY,
+                                                found.radius, height));
+
+                } else if (javax.swing.SwingUtilities.isRightMouseButton(e)) {
+                    // Remove: nearest spot within 3× its radius
+                    Spot nearest = null;
+                    float nearestDist = Float.MAX_VALUE;
+                    for (Spot s : spotsHolder[0]) {
+                        float dx = imgX - s.centroidX, dy = imgY - s.centroidY;
+                        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+                        if (dist < nearestDist && dist < s.radius * 3f) {
+                            nearestDist = dist; nearest = s;
+                        }
+                    }
+                    if (nearest == null) return;
+                    spotsHolder[0].remove(nearest);
+
+                } else {
+                    return; // middle button or other — ignore
+                }
+                refreshOverlay.run();
+            }
+        };
+
+        if (canvas != null) canvas.addMouseListener(spotEditor);
+
         confirmBtn.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 panelResult[0] = StepResult.CONTINUE;
-                dlg.dispose();
+                waitHandle.release();
             }
         });
         backBtn.addActionListener(new java.awt.event.ActionListener() {
             public void actionPerformed(java.awt.event.ActionEvent e) {
                 panelResult[0] = StepResult.BACK;
-                dlg.dispose();
+                waitHandle.release();
             }
         });
         dlg.addWindowListener(new java.awt.event.WindowAdapter() {
             public void windowClosing(java.awt.event.WindowEvent e) {
                 panelResult[0] = StepResult.CANCEL;
-                dlg.dispose();
+                waitHandle.release();
             }
         });
 
@@ -538,10 +596,10 @@ public class WizardController {
         javax.swing.JPanel sliderRow = new javax.swing.JPanel(new java.awt.BorderLayout(6, 0));
         sliderRow.add(new javax.swing.JLabel("0.1×"), java.awt.BorderLayout.WEST);
         sliderRow.add(slider, java.awt.BorderLayout.CENTER);
-        sliderRow.add(new javax.swing.JLabel("5×"), java.awt.BorderLayout.EAST);
+        sliderRow.add(new javax.swing.JLabel("5×"),   java.awt.BorderLayout.EAST);
 
         javax.swing.JPanel fieldRow = new javax.swing.JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+            new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
         fieldRow.add(new javax.swing.JLabel("Multiplier:"));
         fieldRow.add(multField);
         fieldRow.add(new javax.swing.JLabel("  ← type and press Enter"));
@@ -550,8 +608,10 @@ public class WizardController {
         main.setLayout(new javax.swing.BoxLayout(main, javax.swing.BoxLayout.Y_AXIS));
         main.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 14, 8, 14));
         main.add(new javax.swing.JLabel(
-            "<html><b>Drag the slider</b> — yellow circles show detected spots on the image.<br>" +
-            "Lower multiplier = include dimmer spots &nbsp;|&nbsp; Higher = brighter spots only</html>"));
+            "<html><b>Drag the slider</b> to auto-detect spots (numbered yellow circles).<br>" +
+            "<b>Left-click</b> on the image to add a missed spot.<br>" +
+            "<b>Right-click</b> on a circle to remove a false positive.<br>" +
+            "<i>Moving the slider resets all manual adds and removes.</i></html>"));
         main.add(javax.swing.Box.createVerticalStrut(10));
         main.add(sliderRow);
         main.add(javax.swing.Box.createVerticalStrut(4));
@@ -562,7 +622,7 @@ public class WizardController {
         main.add(invertBox);
 
         javax.swing.JPanel btnRow = new javax.swing.JPanel(
-                new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
+            new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 4));
         btnRow.add(backBtn);
         btnRow.add(confirmBtn);
 
@@ -571,7 +631,7 @@ public class WizardController {
         dlg.pack();
         dlg.setMinimumSize(new java.awt.Dimension(380, 0));
 
-        // Try to place the dialog to the right of the image window
+        // Position the control panel to the right of the image window
         java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
         if (work.getWindow() != null) {
             java.awt.Rectangle wr = work.getWindow().getBounds();
@@ -582,79 +642,25 @@ public class WizardController {
             dlg.setLocationRelativeTo(null);
         }
 
-        // Run initial detection, then show the dialog (blocks until user acts)
-        doDetect.run();
+        doDetect.run();     // initial auto-detection before showing the panel
         dlg.setVisible(true);
+        waitHandle.waitFor(); // block until Confirm / Back / Close
+
+        if (canvas != null) canvas.removeMouseListener(spotEditor);
+        dlg.dispose();
 
         if (panelResult[0] != StepResult.CONTINUE) return panelResult[0];
 
         state.thresholdFactor = slider.getValue() / 100.0;
-        int autoCount = spotsHolder[0].size();
-        state.spots = new ArrayList<>(spotsHolder[0]);
 
-        // --- Part B: remove false positives ---
-        work.setRoi((ij.gui.Roi) null);
-        IJ.setTool("multipoint");
-        work.setTitle("Remove false spots — click inside unwanted circles");
-
-        WaitForUserDialog removeDlg = new WaitForUserDialog(
-            "TLC Digitizer — Step 5: Remove false positives",
-            state.spots.size() + " spots detected (yellow circles).\n\n" +
-            "Click inside any circle that is NOT a real spot\n" +
-            "(dirt, scratches, plate edges, etc.).\n" +
-            "The nearest detected spot to each click will be removed.\n\n" +
-            "Click OK immediately if nothing needs removing.");
-        removeDlg.show();
-
-        if (!removeDlg.escPressed()) {
-            ij.gui.Roi removeRoi = work.getRoi();
-            if (removeRoi instanceof PointRoi) {
-                FloatPolygon clicks = removeRoi.getFloatPolygon();
-                for (int i = 0; i < clicks.npoints; i++) {
-                    float cx = clicks.xpoints[i];
-                    float cy = clicks.ypoints[i];
-                    Spot nearest = null;
-                    float nearestDist = Float.MAX_VALUE;
-                    for (Spot s : state.spots) {
-                        float dx = cx - s.centroidX;
-                        float dy = cy - s.centroidY;
-                        float dist = (float) Math.sqrt(dx * dx + dy * dy);
-                        // Only snap to spots within 3× their radius
-                        if (dist < nearestDist && dist < s.radius * 3f) {
-                            nearestDist = dist;
-                            nearest = s;
-                        }
-                    }
-                    if (nearest != null) state.spots.remove(nearest);
-                }
-            }
-            updateSpotOverlay(ov, work, state.spots);
-        }
-
-        // --- Part C: add missed spots ---
-        work.setRoi((ij.gui.Roi) null);
-        IJ.setTool("multipoint");
-        work.setTitle("Add missed spots — " + state.spots.size() + " remaining");
-
-        WaitForUserDialog addDlg = new WaitForUserDialog(
-            "TLC Digitizer — Step 5: Add missed spots",
-            state.spots.size() + " spots remaining (yellow circles).\n\n" +
-            "Click on any real spots that were not detected.\n" +
-            "Do NOT re-click already-circled spots.\n\n" +
-            "Click OK immediately if nothing needs adding.");
-        addDlg.show();
-
-        if (!addDlg.escPressed()) {
-            ij.gui.Roi clickedRoi = work.getRoi();
-            if (clickedRoi instanceof PointRoi) {
-                FloatPolygon poly = clickedRoi.getFloatPolygon();
-                float meanRadius = meanSpotRadius(state.spots);
-                int nextId = state.spots.isEmpty() ? 0
-                    : state.spots.stream().mapToInt(s -> s.id).max().getAsInt() + 1;
-                for (int i = 0; i < poly.npoints; i++) {
-                    state.spots.add(new Spot(nextId++, poly.xpoints[i], poly.ypoints[i], meanRadius, height));
-                }
-            }
+        // Re-sort top-to-bottom and assign clean sequential IDs (id is final, so rebuild)
+        List<Spot> sorted = new ArrayList<>(spotsHolder[0]);
+        sorted.sort(java.util.Comparator.comparingDouble((Spot s) -> s.centroidY)
+                                         .thenComparingDouble(s -> s.centroidX));
+        state.spots = new ArrayList<>();
+        for (int i = 0; i < sorted.size(); i++) {
+            Spot old = sorted.get(i);
+            state.spots.add(new Spot(i, old.centroidX, old.centroidY, old.radius, height));
         }
 
         // --- Pipeline ---
@@ -672,8 +678,7 @@ public class WizardController {
 
         updateSpotOverlay(ov, work, state.spots);
         work.setTitle("Detected spots (" + state.spots.size() + ")");
-        IJ.log("[Step 5] " + state.spots.size() + " spots total (auto: " + autoCount +
-               ", manual: " + (state.spots.size() - autoCount) + ").");
+        IJ.log("[Step 5] " + state.spots.size() + " spots finalized.");
         return StepResult.CONTINUE;
     }
 
@@ -781,9 +786,13 @@ public class WizardController {
     // Helpers
     // -------------------------------------------------------------------------
 
-    /** Clears {@code ov}, redraws all spots as yellow circles, and refreshes the image. */
+    /**
+     * Clears {@code ov}, redraws all spots as numbered yellow circles, and refreshes the image.
+     * Each spot gets a yellow circle and a bold ID label centred on the spot.
+     */
     private static void updateSpotOverlay(Overlay ov, ImagePlus imp, List<Spot> spots) {
         ov.clear();
+        java.awt.Font labelFont = new java.awt.Font("SansSerif", java.awt.Font.BOLD, 11);
         for (Spot s : spots) {
             ij.gui.OvalRoi oval = new ij.gui.OvalRoi(
                 s.centroidX - s.radius, s.centroidY - s.radius,
@@ -792,22 +801,44 @@ public class WizardController {
             oval.setStrokeColor(Color.YELLOW);
             oval.setStrokeWidth(1.5);
             ov.add(oval);
+            // ID label: position slightly above-centre of the circle
+            ij.gui.TextRoi label = new ij.gui.TextRoi(
+                (double)(s.centroidX - 4), (double)(s.centroidY - 6),
+                String.valueOf(s.id), labelFont);
+            label.setStrokeColor(Color.YELLOW);
+            label.setName("label_" + s.id);
+            ov.add(label);
         }
-        IJ.showStatus(spots.size() + " spots detected");
+        IJ.showStatus(spots.size() + " spots");
         imp.updateAndDraw();
     }
 
-    /** Returns the mean radius of all spots, or 20 px if the list is empty. */
-    private static float meanSpotRadius(List<Spot> spots) {
-        if (spots.isEmpty()) return 20f;
-        double sum = 0;
-        for (Spot s : spots) sum += s.radius;
-        return (float) (sum / spots.size());
+    // -------------------------------------------------------------------------
+    // WaitHandle: blocks the calling thread while keeping the AWT event loop running.
+    // Uses SecondaryLoop when called from the EDT, CountDownLatch otherwise.
+    // -------------------------------------------------------------------------
+
+    private interface WaitHandle {
+        void waitFor();
+        void release();
     }
 
-    private void showSpotOverlay(ImagePlus imp, List<Spot> spots) {
-        Overlay ov = new Overlay();
-        updateSpotOverlay(ov, imp, spots);
-        imp.setOverlay(ov);
+    private static WaitHandle makeWaitHandle() {
+        if (java.awt.EventQueue.isDispatchThread()) {
+            java.awt.SecondaryLoop loop = java.awt.Toolkit.getDefaultToolkit()
+                .getSystemEventQueue().createSecondaryLoop();
+            return new WaitHandle() {
+                public void waitFor() { loop.enter(); }
+                public void release() { loop.exit(); }
+            };
+        }
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        return new WaitHandle() {
+            public void waitFor() {
+                try { latch.await(); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+            public void release() { latch.countDown(); }
+        };
     }
 }

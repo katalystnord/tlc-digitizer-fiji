@@ -125,6 +125,78 @@ public final class SpotDetector {
         return spots;
     }
 
+    /**
+     * Detects a single spot at a specific image coordinate using local thresholding.
+     * Used when the user manually adds a spot by clicking on the image canvas.
+     * Thresholds a local patch centred on the click so that even a dim spot
+     * against a bright background will be found correctly.
+     *
+     * @param fp          background-corrected image (same as passed to {@link #detect})
+     * @param clickX      x coordinate of the click in image pixels
+     * @param clickY      y coordinate of the click in image pixels
+     * @param imageHeight full image height (used for {@link Spot} Rf normalisation)
+     * @return a {@link Spot} with {@code id = -1}; caller must assign a real id; never null
+     */
+    public static Spot detectAtPoint(FloatProcessor fp, int clickX, int clickY, int imageHeight) {
+        int w = fp.getWidth(), h = fp.getHeight();
+        float[] pixels = (float[]) fp.getPixels();
+        int maxDim = Math.max(w, h);
+
+        // Clamp to image bounds
+        clickX = Math.max(0, Math.min(w - 1, clickX));
+        clickY = Math.max(0, Math.min(h - 1, clickY));
+
+        // Local patch radius ≈ minimum spot size
+        int searchR = Math.max(10, (int)(maxDim * SIZE_MIN_FRACTION));
+        int x0 = Math.max(0, clickX - searchR), x1 = Math.min(w - 1, clickX + searchR);
+        int y0 = Math.max(0, clickY - searchR), y1 = Math.min(h - 1, clickY + searchR);
+        int lw = x1 - x0 + 1, lh = y1 - y0 + 1;
+
+        // Extract patch pixels
+        float[] local = new float[lw * lh];
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+                local[(y - y0) * lw + (x - x0)] = pixels[y * w + x];
+
+        // Threshold at local mean and label components within patch
+        boolean[] binary = threshold(local, computeMean(local));
+        int[] labels = labelComponents(binary, lw, lh);
+
+        // Component containing the click
+        int lx = Math.min(lw - 1, clickX - x0);
+        int ly = Math.min(lh - 1, clickY - y0);
+        int clickLabel = labels[ly * lw + lx];
+
+        float defaultR = Math.max(5f, maxDim * SIZE_MIN_FRACTION * 0.5f);
+
+        if (clickLabel == 0) {
+            // Background click — return a minimum-size spot centred at the click
+            return new Spot(-1, clickX, clickY, defaultR, imageHeight);
+        }
+
+        // Intensity-weighted centroid + bounding box in global image coordinates
+        double sumX = 0, sumY = 0, sumV = 0;
+        int minBX = w, minBY = h, maxBX = 0, maxBY = 0;
+        for (int ly2 = 0; ly2 < lh; ly2++) {
+            for (int lx2 = 0; lx2 < lw; lx2++) {
+                if (labels[ly2 * lw + lx2] == clickLabel) {
+                    int gx = x0 + lx2, gy = y0 + ly2;
+                    float v = pixels[gy * w + gx];
+                    sumX += gx * v;  sumY += gy * v;  sumV += v;
+                    if (gx < minBX) minBX = gx;
+                    if (gy < minBY) minBY = gy;
+                    if (gx > maxBX) maxBX = gx;
+                    if (gy > maxBY) maxBY = gy;
+                }
+            }
+        }
+        if (sumV == 0) return new Spot(-1, clickX, clickY, defaultR, imageHeight);
+
+        float cx = (float)(sumX / sumV), cy = (float)(sumY / sumV);
+        float r = Math.max(defaultR, minCornerDistance(cx, cy, minBX, minBY, maxBX, maxBY));
+        return new Spot(-1, cx, cy, r, imageHeight);
+    }
+
     // -------------------------------------------------------------------------
     // Algorithm steps (package-private for unit testing)
     // -------------------------------------------------------------------------
