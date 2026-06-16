@@ -70,36 +70,50 @@ public class SpotDetectorTest {
         assertNotEquals(l1, l2);
     }
 
-    @Test
-    public void detect_syntheticSpot_findsOneSpot() {
-        // Create a 200×200 image with a single bright circular spot in the centre
-        int w = 200, h = 200;
+    private static FloatProcessor syntheticSpotImage(int w, int h,
+                                                       float cx, float cy, float r,
+                                                       float bgLevel, float spotLevel) {
         float[] pixels = new float[w * h];
-        float cx = 100, cy = 100, r = 20;
-        float bgLevel = 50f;
-        float spotLevel = 200f;
-
-        // Fill with background below mean
         for (int i = 0; i < pixels.length; i++) pixels[i] = bgLevel * 0.5f;
-
-        // Draw a circle brighter than mean
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 float dx = x - cx, dy = y - cy;
-                if (dx * dx + dy * dy <= r * r) {
-                    pixels[y * w + x] = spotLevel;
-                }
+                if (dx * dx + dy * dy <= r * r) pixels[y * w + x] = spotLevel;
             }
         }
+        return new FloatProcessor(w, h, pixels, null);
+    }
 
-        FloatProcessor fp = new FloatProcessor(w, h, pixels, null);
+    @Test
+    public void detect_syntheticSpot_findsOneSpot() {
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
         List<Spot> spots = SpotDetector.detect(fp);
 
         assertEquals("Should detect exactly one spot", 1, spots.size());
-
         Spot s = spots.get(0);
-        assertEquals("Centroid X near 100", cx, s.centroidX, 5.0f);
-        assertEquals("Centroid Y near 100", cy, s.centroidY, 5.0f);
+        assertEquals("Centroid X near 100", 100f, s.centroidX, 5.0f);
+        assertEquals("Centroid Y near 100", 100f, s.centroidY, 5.0f);
+    }
+
+    @Test
+    public void detect_multiplierOverload_matchesDefaultAtOne() {
+        // detect(fp, 1.0f) must produce the same spots as detect(fp)
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> def  = SpotDetector.detect(fp);
+        List<Spot> mult = SpotDetector.detect(fp, 1.0f);
+        assertEquals("Same spot count", def.size(), mult.size());
+        if (!def.isEmpty()) {
+            assertEquals("Same centroid X", def.get(0).centroidX, mult.get(0).centroidX, 1e-3f);
+            assertEquals("Same centroid Y", def.get(0).centroidY, mult.get(0).centroidY, 1e-3f);
+        }
+    }
+
+    @Test
+    public void detect_withVeryHighMultiplier_findsNothing() {
+        // Threshold = 100 × mean → no pixel in any realistic image can exceed this
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp, 100f);
+        assertTrue("Extreme threshold should eliminate all spots", spots.isEmpty());
     }
 
     @Test

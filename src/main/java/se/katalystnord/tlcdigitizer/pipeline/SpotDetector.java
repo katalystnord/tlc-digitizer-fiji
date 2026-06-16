@@ -34,19 +34,31 @@ public final class SpotDetector {
     private SpotDetector() {}
 
     /**
-     * Runs the full detection pipeline on the corrected image.
+     * Runs the full detection pipeline on the corrected image using mean threshold.
      *
      * @param fp background-corrected FloatProcessor
      * @return list of detected spots, sorted by Y centroid (top to bottom)
      */
     public static List<Spot> detect(FloatProcessor fp) {
+        return detect(fp, 1.0f);
+    }
+
+    /**
+     * Runs the full detection pipeline using {@code mean × thresholdMultiplier} as the threshold.
+     * Values > 1 make detection stricter (only brighter regions); < 1 include dimmer spots.
+     *
+     * @param fp                  background-corrected FloatProcessor
+     * @param thresholdMultiplier multiplier applied to the image mean (must be > 0)
+     * @return list of detected spots, sorted by Y centroid (top to bottom)
+     */
+    public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier) {
         int width = fp.getWidth();
         int height = fp.getHeight();
         float[] pixels = (float[]) fp.getPixels();
 
-        // 1. Threshold at mean
+        // 1. Threshold at mean × multiplier
         float mean = computeMean(pixels);
-        boolean[] binary = threshold(pixels, mean);
+        boolean[] binary = threshold(pixels, mean * Math.max(0.01f, thresholdMultiplier));
 
         // 2. Morphological opening (erosion then dilation with square SE)
         int maxDim = Math.max(width, height);

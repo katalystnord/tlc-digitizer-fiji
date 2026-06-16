@@ -20,6 +20,7 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 import java.util.stream.Collectors;
@@ -37,9 +38,23 @@ import java.util.stream.Collectors;
 public class WizardController {
 
     private final AnalysisState state;
+    /** The currently-visible step result window; closed automatically when the next step opens. */
+    private ImagePlus currentDisplay = null;
 
     public WizardController(AnalysisState state) {
         this.state = state;
+    }
+
+    /**
+     * Shows {@code imp} and closes the previous step's display window.
+     * Keeps the screen tidy — at most one step-result window open at a time.
+     */
+    private void showDisplay(ImagePlus imp) {
+        if (currentDisplay != null && currentDisplay.isVisible()) {
+            currentDisplay.close();
+        }
+        currentDisplay = imp;
+        imp.show();
     }
 
     /** Runs all 7 steps in sequence. Returns false if the user cancels at any step. */
@@ -74,7 +89,7 @@ public class WizardController {
         }
 
         ImagePlus preview = new ImagePlus("Grayscale preview", state.grayscale.duplicate());
-        preview.show();
+        showDisplay(preview);
         IJ.log("[Step 1] Grayscale conversion done. Size: " +
                state.grayscale.getWidth() + "×" + state.grayscale.getHeight());
         return true;
@@ -139,7 +154,7 @@ public class WizardController {
 
         state.corrected = PerspectiveCorrection.warpImage(state.grayscale, state.corners);
         ImagePlus corrPreview = new ImagePlus("Corrected plate", state.corrected.duplicate());
-        corrPreview.show();
+        showDisplay(corrPreview); // closes grayscale preview
         IJ.log("[Step 2] Perspective correction done. Output: " +
                state.corrected.getWidth() + "×" + state.corrected.getHeight());
         return true;
@@ -197,7 +212,7 @@ public class WizardController {
         IJ.showStatus("");
 
         ImagePlus bgPreview = new ImagePlus("Background corrected", state.corrected.duplicate());
-        bgPreview.show();
+        showDisplay(bgPreview); // closes corrected-plate preview
         IJ.log("[Step 3] Background correction done.");
         return true;
     }
@@ -340,34 +355,129 @@ public class WizardController {
         });
     }
 
+    /**
+     * Variant of {@link #addArrowStepping(TextField, double, Runnable)} with
+     * explicit min/max bounds. Used for threshold multipliers and similar fields
+     * that are not restricted to [0, 1].
+     */
+    private static void addArrowStepping(final TextField field,
+                                         final double step,
+                                         final double minVal,
+                                         final double maxVal,
+                                         final Runnable onChange) {
+        field.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                int code = e.getKeyCode();
+                if (code != KeyEvent.VK_UP && code != KeyEvent.VK_DOWN) return;
+                try {
+                    double val = Double.parseDouble(field.getText().trim());
+                    val += (code == KeyEvent.VK_UP ? step : -step);
+                    val = Math.max(minVal, Math.min(maxVal, val));
+                    field.setText(String.format("%.2f", val));
+                    onChange.run();
+                    e.consume();
+                } catch (NumberFormatException ex) {
+                    // ignore
+                }
+            }
+        });
+    }
+
     // -------------------------------------------------------------------------
     // Step 5: Spot detection
     // -------------------------------------------------------------------------
 
+    @SuppressWarnings("unchecked")
     boolean step5_spotDetection() {
-        GenericDialog gd = new GenericDialog("TLC Digitizer — Step 5: Spot Detection");
-        gd.addMessage("Spots are detected automatically at the image mean threshold.\n" +
-                      "Adjust the multiplier if too few or too many spots appear.");
+        final int width  = state.corrected.getWidth();
+        final int height = state.corrected.getHeight();
+
+        // Open the spot detection window; closes the background-corrected preview
+        final ImagePlus work = new ImagePlus("Spot detection", state.corrected.duplicate());
+        showDisplay(work);
+        final Overlay ov = new Overlay();
+        work.setOverlay(ov);
+
+        // Single-element array used as a mutable reference from anonymous inner classes
+        final List<Spot>[] spotsHolder = new List[1];
+        spotsHolder[0] = SpotDetector.detect(state.corrected, 1.0f);
+        updateSpotOverlay(ov, work, spotsHolder[0]);
+
+        // --- Part A: live threshold preview ---
+        final GenericDialog gd = new GenericDialog("TLC Digitizer — Step 5: Spot Detection");
+        gd.addMessage(
+            "Spots above the threshold are circled in yellow.\n" +
+            "Lower multiplier → more spots (dimmer included).\n" +
+            "Higher multiplier → fewer spots (brighter only).\n" +
+            "Use ↑ / ↓ to step by 0.1.");
         gd.addNumericField("Threshold multiplier:", 1.0, 2);
+
+        final Vector<TextField> threshFields = gd.getNumericFields();
+        final TextField threshField = threshFields.get(0);
+
+        final Runnable redetect = new Runnable() {
+            public void run() {
+                try {
+                    float mult = Float.parseFloat(threshField.getText().trim());
+                    if (mult > 0) {
+                        spotsHolder[0] = SpotDetector.detect(state.corrected, mult);
+                        updateSpotOverlay(ov, work, spotsHolder[0]);
+                    }
+                } catch (NumberFormatException ex) { /* mid-type, skip */ }
+            }
+        };
+
+        gd.addDialogListener(new DialogListener() {
+            public boolean dialogItemChanged(GenericDialog d, AWTEvent e) {
+                redetect.run();
+                return true;
+            }
+        });
+        addArrowStepping(threshField, 0.1, 0.1, 10.0, redetect);
+
         gd.showDialog();
         if (gd.wasCanceled()) return false;
 
-        state.thresholdFactor = gd.getNextNumber();
+        try {
+            state.thresholdFactor = Double.parseDouble(threshField.getText().trim());
+        } catch (NumberFormatException ex) {
+            state.thresholdFactor = 1.0;
+        }
 
-        IJ.showStatus("Detecting spots…");
-        state.spots = SpotDetector.detect(state.corrected);
-        IJ.showStatus("");
+        int autoCount = spotsHolder[0].size();
+        state.spots = new ArrayList<>(spotsHolder[0]);
 
-        // Assign lane numbers (left-to-right, 1-indexed)
-        LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
+        // --- Part B: manual addition of missed spots ---
+        work.setRoi((ij.gui.Roi) null);
+        IJ.setTool("multipoint");
+        work.setTitle("Add missed spots — " + autoCount + " auto-detected");
 
-        // Assign Rf values
+        WaitForUserDialog addDlg = new WaitForUserDialog(
+            "TLC Digitizer — Step 5: Add missed spots",
+            autoCount + " spots auto-detected (yellow circles).\n\n" +
+            "Click on any missed spots with the Multipoint tool.\n" +
+            "Do NOT re-click already-circled spots.\n\n" +
+            "Click OK when done.");
+        addDlg.show();
+
+        if (!addDlg.escPressed()) {
+            ij.gui.Roi clickedRoi = work.getRoi();
+            if (clickedRoi instanceof PointRoi) {
+                FloatPolygon poly = clickedRoi.getFloatPolygon();
+                float meanRadius = meanSpotRadius(state.spots);
+                int nextId = state.spots.size();
+                for (int i = 0; i < poly.npoints; i++) {
+                    state.spots.add(new Spot(nextId++, poly.xpoints[i], poly.ypoints[i], meanRadius, height));
+                }
+            }
+        }
+
+        // --- Pipeline: assign lanes, Rf, integrate, Option B correction ---
+        LaneAssigner.assignLanes(state.spots, width);
         RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
-
-        // Integrate
         SpotIntegrator.integrateAll(state.corrected, state.spots);
 
-        // Option B: apply per-spot polynomial background correction after integration
         if (!state.usedPolynomialBackground) {
             IJ.showStatus("Fitting per-spot background polynomial…");
             BackgroundCorrection.applyPerSpotPolynomial(
@@ -377,21 +487,12 @@ public class WizardController {
                    BackgroundCorrection.DEFAULT_SG_DEGREE + ").");
         }
 
-        // Show detected spots as overlay
-        ImagePlus work = new ImagePlus("Detected spots", state.corrected.duplicate());
-        showSpotOverlay(work, state.spots);
-        work.show();
-
-        IJ.log("[Step 5] Detected " + state.spots.size() + " spots.");
-
-        // Let user confirm or adjust
-        GenericDialog confirm = new GenericDialog("TLC Digitizer — Step 5: Confirm Spots");
-        confirm.addMessage(state.spots.size() + " spots detected.\n" +
-                           "Review the overlay. If spots are wrong, cancel and re-run\n" +
-                           "with a different threshold multiplier.");
-        confirm.showDialog();
-        work.close();
-        return !confirm.wasCanceled();
+        // Show final overlay with all spots (auto + manually added)
+        updateSpotOverlay(ov, work, state.spots);
+        work.setTitle("Detected spots (" + state.spots.size() + ")");
+        IJ.log("[Step 5] " + state.spots.size() + " spots total (auto: " + autoCount +
+               ", manual: " + (state.spots.size() - autoCount) + ").");
+        return true;
     }
 
     // -------------------------------------------------------------------------
@@ -485,16 +586,33 @@ public class WizardController {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private void showSpotOverlay(ImagePlus imp, List<Spot> spots) {
-        Overlay ov = new Overlay();
+    /** Clears {@code ov}, redraws all spots as yellow circles, and refreshes the image. */
+    private static void updateSpotOverlay(Overlay ov, ImagePlus imp, List<Spot> spots) {
+        ov.clear();
         for (Spot s : spots) {
             ij.gui.OvalRoi oval = new ij.gui.OvalRoi(
                 s.centroidX - s.radius, s.centroidY - s.radius,
                 s.radius * 2, s.radius * 2);
             oval.setName("spot_" + s.id);
             oval.setStrokeColor(Color.YELLOW);
+            oval.setStrokeWidth(1.5);
             ov.add(oval);
         }
+        IJ.showStatus(spots.size() + " spots detected");
+        imp.updateAndDraw();
+    }
+
+    /** Returns the mean radius of all spots, or 20 px if the list is empty. */
+    private static float meanSpotRadius(List<Spot> spots) {
+        if (spots.isEmpty()) return 20f;
+        double sum = 0;
+        for (Spot s : spots) sum += s.radius;
+        return (float) (sum / spots.size());
+    }
+
+    private void showSpotOverlay(ImagePlus imp, List<Spot> spots) {
+        Overlay ov = new Overlay();
+        updateSpotOverlay(ov, imp, spots);
         imp.setOverlay(ov);
     }
 }
