@@ -34,14 +34,23 @@ import java.util.List;
  */
 public final class PerspectiveCorrection {
 
-    /** Vote threshold for Hough line detection (analogous to TLCyzer's 40). */
-    private static final int HOUGH_VOTE_THRESHOLD = 40;
+    /** Hough accumulator minimum: fraction of the peak bin that counts as a line. */
+    private static final float HOUGH_VOTE_FRACTION = 0.40f;
+
+    /** Absolute floor so very low-contrast images still have some threshold. */
+    private static final int HOUGH_VOTE_MIN = 15;
 
     /** Non-maximum suppression radius in Hough space (angle bins). */
     private static final int HOUGH_SUPPRESSION_RADIUS = 8;
 
-    /** Angle tolerance for classifying lines as horizontal or vertical (degrees). */
-    private static final int ANGLE_TOLERANCE = 2;
+    /**
+     * Angle tolerance for classifying Hough lines as horizontal or vertical (degrees).
+     * 15° accommodates plates photographed at a moderate tilt.
+     */
+    private static final int ANGLE_TOLERANCE = 15;
+
+    /** Sobel edge threshold as a fraction of the maximum gradient magnitude. */
+    private static final float SOBEL_THRESHOLD = 0.25f;
 
     private PerspectiveCorrection() {}
 
@@ -65,11 +74,8 @@ public final class PerspectiveCorrection {
         int sh = height / factor;
         float[] small = downsample(fp, sw, sh, factor);
 
-        // 2. Adaptive threshold on the small image
-        boolean[] binary = adaptiveThreshold(small, sw, sh, Math.max(3, sw / 3));
-
-        // 3. Boundary / edge pixels
-        boolean[] edges = extractBoundaryPixels(binary, sw, sh);
+        // 2. Sobel edge detection (replaces adaptive-threshold + boundary-pixel approach)
+        boolean[] edges = sobelEdges(small, sw, sh);
 
         // 4. Hough transform
         float[][] accumulator = houghTransform(edges, sw, sh);
@@ -146,46 +152,55 @@ public final class PerspectiveCorrection {
         return small;
     }
 
-    /** Local mean threshold: pixel >= local mean in window → foreground. */
-    static boolean[] adaptiveThreshold(float[] img, int width, int height, int windowRadius) {
-        boolean[] result = new boolean[img.length];
+    /**
+     * Sobel edge detection on a float grayscale image.
+     *
+     * A 3×3 box blur is applied first to suppress pixel noise. The Sobel gradient
+     * magnitude is then thresholded at {@link #SOBEL_THRESHOLD} × peak magnitude.
+     * Strong, long plate boundaries will dominate the resulting edge map and
+     * produce clear Hough accumulator peaks.
+     */
+    static boolean[] sobelEdges(float[] img, int width, int height) {
+        // 3×3 box blur (reduce noise before gradient computation)
+        float[] blurred = new float[img.length];
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                int x0 = Math.max(0, x - windowRadius);
-                int x1 = Math.min(width - 1, x + windowRadius);
-                int y0 = Math.max(0, y - windowRadius);
-                int y1 = Math.min(height - 1, y + windowRadius);
-                double sum = 0;
+                float sum = 0;
                 int cnt = 0;
-                for (int yy = y0; yy <= y1; yy++) {
-                    for (int xx = x0; xx <= x1; xx++) {
-                        sum += img[yy * width + xx];
-                        cnt++;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nx = x + dx, ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            sum += img[ny * width + nx];
+                            cnt++;
+                        }
                     }
                 }
-                result[y * width + x] = img[y * width + x] >= (float) (sum / cnt);
+                blurred[y * width + x] = sum / cnt;
             }
         }
-        return result;
-    }
 
-    /** Extract boundary pixels: foreground pixels adjacent to background (4-connectivity). */
-    static boolean[] extractBoundaryPixels(boolean[] binary, int width, int height) {
-        boolean[] edges = new boolean[binary.length];
-        int[] dx = {1, -1, 0, 0};
-        int[] dy = {0, 0, 1, -1};
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (!binary[y * width + x]) continue;
-                for (int d = 0; d < 4; d++) {
-                    int nx = x + dx[d];
-                    int ny = y + dy[d];
-                    if (nx < 0 || nx >= width || ny < 0 || ny >= height || !binary[ny * width + nx]) {
-                        edges[y * width + x] = true;
-                        break;
-                    }
-                }
+        // Sobel gradient magnitude
+        float[] grad = new float[img.length];
+        float maxGrad = 0;
+        for (int y = 1; y < height - 1; y++) {
+            for (int x = 1; x < width - 1; x++) {
+                float gx = -blurred[(y-1)*width+(x-1)] - 2*blurred[y*width+(x-1)] - blurred[(y+1)*width+(x-1)]
+                           +blurred[(y-1)*width+(x+1)] + 2*blurred[y*width+(x+1)] + blurred[(y+1)*width+(x+1)];
+                float gy = -blurred[(y-1)*width+(x-1)] - 2*blurred[(y-1)*width+x] - blurred[(y-1)*width+(x+1)]
+                           +blurred[(y+1)*width+(x-1)] + 2*blurred[(y+1)*width+x] + blurred[(y+1)*width+(x+1)];
+                float g = (float) Math.sqrt(gx * gx + gy * gy);
+                grad[y * width + x] = g;
+                if (g > maxGrad) maxGrad = g;
             }
+        }
+
+        if (maxGrad == 0) return new boolean[img.length]; // flat image — no edges
+
+        float threshold = maxGrad * SOBEL_THRESHOLD;
+        boolean[] edges = new boolean[img.length];
+        for (int i = 0; i < grad.length; i++) {
+            edges[i] = grad[i] >= threshold;
         }
         return edges;
     }
@@ -221,26 +236,37 @@ public final class PerspectiveCorrection {
         return acc;
     }
 
-    /** Extract lines from Hough accumulator above threshold with NMS in theta dimension. */
+    /**
+     * Extracts dominant lines from the Hough accumulator.
+     *
+     * Vote threshold is adaptive: HOUGH_VOTE_FRACTION × peak bin, with an absolute
+     * floor of HOUGH_VOTE_MIN. NMS is applied in the theta dimension only (we want
+     * to keep multiple parallel lines at different r values, e.g. top and bottom plate edges).
+     */
     private static List<float[]> extractLines(float[][] acc, int width, int height) {
         int diag = (int) Math.ceil(Math.sqrt(width * width + height * height));
         int nTheta = acc.length;
         int nR = acc[0].length;
-        List<float[]> lines = new ArrayList<>();
 
+        float maxVote = 0;
         for (int t = 0; t < nTheta; t++) {
             for (int r = 0; r < nR; r++) {
-                if (acc[t][r] < HOUGH_VOTE_THRESHOLD) continue;
-                // Check local maximum in theta dimension within suppression radius
+                if (acc[t][r] > maxVote) maxVote = acc[t][r];
+            }
+        }
+        float threshold = Math.max(HOUGH_VOTE_MIN, maxVote * HOUGH_VOTE_FRACTION);
+
+        List<float[]> lines = new ArrayList<>();
+        for (int t = 0; t < nTheta; t++) {
+            for (int r = 0; r < nR; r++) {
+                if (acc[t][r] < threshold) continue;
                 boolean isMax = true;
                 for (int dt = -HOUGH_SUPPRESSION_RADIUS; dt <= HOUGH_SUPPRESSION_RADIUS && isMax; dt++) {
                     if (dt == 0) continue;
                     int nt = (t + dt + nTheta) % nTheta;
                     if (acc[nt][r] > acc[t][r]) isMax = false;
                 }
-                if (isMax) {
-                    lines.add(new float[]{r - diag, t}); // [r_actual, thetaDeg]
-                }
+                if (isMax) lines.add(new float[]{r - diag, t}); // [r_actual, thetaDeg]
             }
         }
         return lines;

@@ -52,6 +52,11 @@ public class TlcDigitizerFrame extends JFrame {
     private ImagePlus displayWindow;
     private int currentStep = 1;
 
+    // Saved state of the original image window — restored on wizard close
+    private ij.process.ImageProcessor savedProcessor;
+    private String savedTitle;
+    private Overlay savedOverlay;
+
     // Navigation controls
     private JButton backBtn;
     private JButton nextBtn;
@@ -165,6 +170,11 @@ public class TlcDigitizerFrame extends JFrame {
     // -----------------------------------------------------------------------
 
     public boolean runWizard() {
+        // Claim the original image window as our display for the whole session
+        try {
+            SwingUtilities.invokeAndWait(this::initDisplay);
+        } catch (Exception e) { return false; }
+
         int step = 1;
         while (step >= 1 && step <= STEP_NAMES.length) {
             final int s = step;
@@ -240,9 +250,29 @@ public class TlcDigitizerFrame extends JFrame {
         if (wh != null) wh.release();
     }
 
+    private void initDisplay() {
+        // Save original image state so we can restore it when the wizard closes
+        savedProcessor = state.originalImage.getProcessor().duplicate();
+        savedTitle     = state.originalImage.getTitle();
+        savedOverlay   = state.originalImage.getOverlay();
+
+        displayWindow  = state.originalImage;
+        displayWindow.setOverlay(null);
+
+        // Position: image left, control panel right
+        if (displayWindow.getWindow() != null) {
+            positionWindows();
+        }
+    }
+
     private void cleanup() {
-        if (displayWindow != null && displayWindow.isVisible()) {
-            displayWindow.close();
+        // Restore original image to the state before the wizard ran
+        if (displayWindow != null && savedProcessor != null) {
+            displayWindow.setProcessor(savedProcessor);
+            displayWindow.setTitle(savedTitle);
+            displayWindow.setOverlay(savedOverlay);
+            displayWindow.setRoi((ij.gui.Roi) null);
+            displayWindow.updateAndDraw();
         }
         dispose();
     }
@@ -251,14 +281,17 @@ public class TlcDigitizerFrame extends JFrame {
     // Display window management
     // -----------------------------------------------------------------------
 
-    /** Close the previous image window and open a new one, positioning both windows. */
-    void showImage(ImagePlus imp) {
-        if (displayWindow != null && displayWindow.isVisible()) {
-            displayWindow.close();
-        }
-        displayWindow = imp;
-        imp.show();
-        positionWindows();
+    /**
+     * Swap the processor shown in the persistent display window.
+     * Safe to call from any thread; ImageJ dispatches the repaint internally.
+     */
+    void setDisplay(ij.process.ImageProcessor ip, String title) {
+        if (displayWindow == null) return;
+        displayWindow.setProcessor(ip);
+        displayWindow.setTitle(title);
+        displayWindow.setOverlay(null);
+        displayWindow.setRoi((ij.gui.Roi) null);
+        displayWindow.updateAndDraw();
     }
 
     ImagePlus getDisplayWindow() { return displayWindow; }
@@ -369,8 +402,8 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         void onEnter() {
-            showImage(new ImagePlus("Original image",
-                state.originalImage.getProcessor().duplicate()));
+            setDisplay(state.originalImage.getProcessor().duplicate(),
+                "TLC Digitizer — Step 1 · Image");
         }
 
         @Override
@@ -397,8 +430,10 @@ public class TlcDigitizerFrame extends JFrame {
             setLayout(new BorderLayout(0, 10));
 
             add(instrPanel("The four plate corners are highlighted on the image.<br>" +
-                "Drag the corner handles directly on the image, or type pixel " +
-                "coordinates below. Order: Top-Left → Top-Right → Bottom-Right → Bottom-Left."),
+                "<b>Drag</b> the corner handles to adjust them. " +
+                "Clicking elsewhere is ignored — extra points are not added.<br>" +
+                "Or type pixel coordinates directly below. " +
+                "Order: Top-Left → Top-Right → Bottom-Right → Bottom-Left."),
                 BorderLayout.NORTH);
 
             String[] names = {"Top-Left", "Top-Right", "Bottom-Right", "Bottom-Left"};
@@ -443,17 +478,24 @@ public class TlcDigitizerFrame extends JFrame {
             if (state.corners == null) {
                 state.corners = PerspectiveCorrection.detectCorners(state.grayscale);
             }
-            ImagePlus work = new ImagePlus("Plate corners — drag to adjust",
-                state.grayscale.duplicate());
-            showImage(work);
+            setDisplay(state.grayscale.duplicate(), "TLC Digitizer — Step 2 · Perspective");
             IJ.setTool("multipoint");
             cornersToSpinners();
             updateRoi();
 
-            ImageCanvas canvas = work.getCanvas();
+            IJ.wait(80);  // let ImageJ create the canvas before attaching the listener
+            ImageCanvas canvas = displayWindow.getCanvas();
             if (canvas != null) {
                 canvas.addMouseListener(new MouseAdapter() {
-                    public void mouseReleased(MouseEvent e) { roiToSpinners(work); }
+                    public void mouseReleased(MouseEvent e) {
+                        ij.gui.Roi roi = displayWindow.getRoi();
+                        if (roi instanceof PointRoi
+                                && roi.getFloatPolygon().npoints > 4) {
+                            updateRoi();
+                            return;
+                        }
+                        roiToSpinners(displayWindow);
+                    }
                 });
             }
         }
@@ -498,7 +540,7 @@ public class TlcDigitizerFrame extends JFrame {
             spinnersToCorners();
             state.corrected     = PerspectiveCorrection.warpImage(state.grayscale, state.corners);
             state.perspCorrected = state.corrected; // snapshot pre-background for step 3 re-entry
-            showImage(new ImagePlus("Perspective corrected", state.corrected.duplicate()));
+            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 2 · Perspective corrected");
             IJ.log("[Step 2] Perspective warp: "
                 + state.corrected.getWidth() + "×" + state.corrected.getHeight());
             return true;
@@ -540,7 +582,7 @@ public class TlcDigitizerFrame extends JFrame {
             // Always show the perspective-corrected image; if the user goes Back
             // from step 4 and changes method, commit() re-applies to perspCorrected.
             FloatProcessor src = (state.perspCorrected != null) ? state.perspCorrected : state.corrected;
-            showImage(new ImagePlus("Pre-background (perspective corrected)", src.duplicate()));
+            setDisplay(src.duplicate(), "TLC Digitizer — Step 3 · Background");
         }
 
         @Override
@@ -555,7 +597,7 @@ public class TlcDigitizerFrame extends JFrame {
                 state.corrected = src; // Savitzky-Golay deferred to post-integration in step 5
                 IJ.log("[Step 3] Savitzky-Golay selected — per-spot correction deferred to step 5.");
             }
-            showImage(new ImagePlus("Background corrected", state.corrected.duplicate()));
+            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 3 · Background corrected");
             IJ.log("[Step 3] Background method: "
                 + (state.usedPolynomialBackground ? "quartic polynomial" : "Savitzky-Golay"));
             return true;
@@ -601,10 +643,9 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         void onEnter() {
-            ImagePlus work = new ImagePlus("Rf reference lines", state.corrected.duplicate());
+            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 4 · Rf Lines");
             overlay = new Overlay();
-            work.setOverlay(overlay);
-            showImage(work);
+            displayWindow.setOverlay(overlay);
             updateLines();
         }
 
@@ -725,18 +766,16 @@ public class TlcDigitizerFrame extends JFrame {
         @Override
         void onEnter() {
             spotHistory.clear();
-            ImagePlus work = new ImagePlus("Spot detection", state.corrected.duplicate());
+            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 5 · Spots");
             overlay = new Overlay();
-            work.setOverlay(overlay);
-            showImage(work);
+            displayWindow.setOverlay(overlay);
 
-            // Wait for Fiji to create the ImageCanvas before attaching mouse listener
-            IJ.wait(120);
-            ImageCanvas canvas = work.getCanvas();
+            IJ.wait(120);  // let ImageJ finish binding the canvas
+            ImageCanvas canvas = displayWindow.getCanvas();
             if (canvas != null) {
                 canvasListener = new MouseAdapter() {
                     public void mouseClicked(MouseEvent e) {
-                        ImageCanvas c = work.getCanvas();
+                        ImageCanvas c = displayWindow.getCanvas();
                         if (c == null) return;
                         int ix = c.offScreenX(e.getX());
                         int iy = c.offScreenY(e.getY());
@@ -910,14 +949,10 @@ public class TlcDigitizerFrame extends JFrame {
             rows.repaint();
             scroll.revalidate();
 
-            // Show spot overlay (re-use existing display if still visible)
-            if (getDisplayWindow() == null || !getDisplayWindow().isVisible()) {
-                ImagePlus imp = new ImagePlus("Calibration spots", state.corrected.duplicate());
-                Overlay ov = new Overlay();
-                imp.setOverlay(ov);
-                showImage(imp);
-                updateSpotOverlay(ov, imp, state.spots);
-            }
+            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 6 · Calibrate");
+            Overlay ov = new Overlay();
+            displayWindow.setOverlay(ov);
+            updateSpotOverlay(ov, displayWindow, state.spots);
         }
 
         private JLabel bold(String text) {
@@ -941,11 +976,20 @@ public class TlcDigitizerFrame extends JFrame {
 
             List<Spot> refs = state.spots.stream()
                 .filter(s -> s.isReference).collect(Collectors.toList());
+            if (refs.size() == 0) {
+                // No references at all — skip calibration and export Rf + integration only
+                IJ.log("[Step 6] No reference spots — calibration skipped; Rf and integration values only.");
+                return true;
+            }
             if (refs.size() < 3) {
-                IJ.error("Step 6 — Calibration",
-                    "At least 3 reference spots are required (ICH Q2(R1)).\n"
-                    + "Currently marked: " + refs.size() + ".");
-                return false;
+                // Warn but allow: useful for quick qualitative runs
+                int choice = JOptionPane.showConfirmDialog(TlcDigitizerFrame.this,
+                    "Only " + refs.size() + " reference spot(s) marked.\n" +
+                    "ICH Q2(R1) recommends at least 3 for a valid calibration curve.\n\n" +
+                    "Continue anyway? (Concentrations will be calculated but may be unreliable.)",
+                    "Step 6 — Calibration Warning",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (choice != JOptionPane.YES_OPTION) return false;
             }
 
             try {
@@ -1026,19 +1070,24 @@ public class TlcDigitizerFrame extends JFrame {
 
     private static void updateSpotOverlay(Overlay ov, ImagePlus imp, List<Spot> spots) {
         ov.clear();
-        Font labelFont = new Font("SansSerif", Font.BOLD, 11);
         for (Spot s : spots) {
             OvalRoi oval = new OvalRoi(
                 s.centroidX - s.radius, s.centroidY - s.radius,
                 s.radius * 2, s.radius * 2);
             oval.setStrokeColor(Color.YELLOW);
-            oval.setStrokeWidth(1.5);
+            oval.setStrokeWidth(Math.max(1.5, s.radius * 0.06));
             oval.setName("spot_" + s.id);
             ov.add(oval);
 
-            TextRoi label = new TextRoi(
-                s.centroidX - 4, s.centroidY - 6,
-                String.valueOf(s.id), labelFont);
+            // Font size scales with the spot so labels stay legible at any zoom / resolution.
+            // Clamp: minimum readable at small zoom, maximum that fits inside large spots.
+            int fontSize = Math.max(14, Math.min(60, (int) s.radius));
+            Font labelFont = new Font("SansSerif", Font.BOLD, fontSize);
+            String idStr = String.valueOf(s.id);
+            // Approximate text-centre offset: ~0.55 × fontSize per char wide, ~0.7 × fontSize tall
+            double tx = s.centroidX - idStr.length() * fontSize * 0.30;
+            double ty = s.centroidY - fontSize * 0.38;
+            TextRoi label = new TextRoi(tx, ty, idStr, labelFont);
             label.setStrokeColor(Color.YELLOW);
             label.setName("label_" + s.id);
             ov.add(label);

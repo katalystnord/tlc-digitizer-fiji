@@ -35,15 +35,16 @@ public class CalibrationModelTest {
 
     @Test
     public void fit_tooFewReferences_throwsException() {
+        // Minimum is now 2 (mathematical minimum for linear regression);
+        // the UI warns for < 3 but CalibrationModel.fit itself requires >= 2.
         List<Spot> refs = new ArrayList<>();
         refs.add(makeRef(0, 100, 200));
-        refs.add(makeRef(1, 200, 400));
 
         try {
             CalibrationModel.fit(refs);
             fail("Should have thrown IllegalArgumentException");
         } catch (IllegalArgumentException e) {
-            assertTrue(e.getMessage().contains("3"));
+            assertTrue(e.getMessage().contains("2"));
         }
     }
 

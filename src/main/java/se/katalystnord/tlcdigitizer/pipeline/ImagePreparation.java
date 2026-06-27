@@ -30,15 +30,14 @@ public final class ImagePreparation {
      * Handles RGB, RGBA, 8-bit gray, and 16-bit gray input.
      */
     public static FloatProcessor toLuminanceGrayscale(ImagePlus imp) {
-        ImageProcessor ip = imp.getProcessor();
+        ImageProcessor ip = resolveProcessor(imp);
 
         if (ip instanceof ColorProcessor) {
             return rgbToLuminance((ColorProcessor) ip);
         }
 
         // Already grayscale — just convert to float
-        FloatProcessor fp = ip.convertToFloatProcessor();
-        return fp;
+        return ip.convertToFloatProcessor();
     }
 
     /**
@@ -47,9 +46,10 @@ public final class ImagePreparation {
      * Validated for UV-fluorescence TLC images (Anton et al. 2023).
      */
     public static FloatProcessor extractGreenChannel(ImagePlus imp) {
-        ImageProcessor ip = imp.getProcessor();
+        ImageProcessor ip = resolveProcessor(imp);
 
         if (!(ip instanceof ColorProcessor)) {
+            // Grayscale input — green channel extraction degrades to a copy
             return ip.convertToFloatProcessor();
         }
 
@@ -70,6 +70,28 @@ public final class ImagePreparation {
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * Returns the active {@link ImageProcessor} for {@code imp}, forcing
+     * processor construction for SCIFIO-opened or hyperstack images where
+     * {@link ImagePlus#getProcessor()} may return null before the image is
+     * explicitly rendered.
+     *
+     * @throws IllegalStateException if no processor can be obtained
+     */
+    private static ImageProcessor resolveProcessor(ImagePlus imp) {
+        ImageProcessor ip = imp.getProcessor();
+        if (ip == null && imp.getStackSize() >= 1) {
+            // SCIFIO / lazy-loaded images: fetch via the stack directly
+            ip = imp.getStack().getProcessor(Math.max(1, imp.getCurrentSlice()));
+        }
+        if (ip == null) {
+            throw new IllegalStateException(
+                "Cannot read image data from '" + imp.getTitle() + "'.\n" +
+                "Try Image ▶ Type ▶ RGB Color in Fiji to convert the image first.");
+        }
+        return ip;
+    }
 
     private static FloatProcessor rgbToLuminance(ColorProcessor cp) {
         int width = cp.getWidth();

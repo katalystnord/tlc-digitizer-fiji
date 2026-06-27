@@ -53,9 +53,9 @@ public final class CalibrationModel {
                         && !Double.isNaN(s.referenceConcentration))
                 .count();
 
-        if (valid < 3) {
+        if (valid < 2) {
             throw new IllegalArgumentException(
-                    "At least 3 reference spots with known concentrations are required (ICH Q2(R1)). Found: " + valid);
+                    "At least 2 reference spots are required for linear regression. Found: " + valid);
         }
 
         SimpleRegression reg = new SimpleRegression(true);
