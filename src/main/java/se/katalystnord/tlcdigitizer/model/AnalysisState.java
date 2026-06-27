@@ -48,6 +48,13 @@ public class AnalysisState {
     /** Calibration model fitted in Stage 7. Null until then. */
     public CalibrationModel calibrationModel;
 
+    /**
+     * Perspective-corrected image BEFORE background subtraction.
+     * Set in Stage 2, used as the source for Stage 3 so that background
+     * correction can be re-run cleanly on Back navigation.
+     */
+    public FloatProcessor perspCorrected;
+
     /** Whether background correction used the polynomial (A) or Savitzky-Golay (B) method. */
     public boolean usedPolynomialBackground = true;
 
