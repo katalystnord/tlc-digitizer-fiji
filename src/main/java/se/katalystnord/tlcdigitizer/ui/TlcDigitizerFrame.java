@@ -612,14 +612,17 @@ public class TlcDigitizerFrame extends JFrame {
         private JSpinner originSp;
         private JSpinner frontSp;
         private Overlay overlay;
+        private MouseAdapter dragListener;
+        private int draggingLine = -1;   // -1=none, 0=origin, 1=front
+        private static final int SNAP_PX = 12;
 
         Step4Panel() {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             add(instrPanel(
                 "Set the <font color='red'><b>origin</b></font> (red) and " +
                 "<font color='blue'><b>solvent front</b></font> (blue) Y positions.<br>" +
-                "Y&nbsp;= 0.0 is the top of the image; Y&nbsp;= 1.0 is the bottom. " +
-                "Use ↑ / ↓ arrow keys for fine adjustment (0.005 steps)."));
+                "<b>Drag</b> either line directly on the image, or use ↑&nbsp;/&nbsp;↓ " +
+                "arrow keys (0.005 steps) for fine adjustment."));
             add(Box.createVerticalStrut(14));
 
             float initO = Float.isNaN(state.originYFraction) ? 0.90f : state.originYFraction;
@@ -647,6 +650,52 @@ public class TlcDigitizerFrame extends JFrame {
             overlay = new Overlay();
             displayWindow.setOverlay(overlay);
             updateLines();
+
+            IJ.setTool("hand");  // prevents ROI creation while dragging lines
+            IJ.wait(80);
+            ImageCanvas canvas = displayWindow.getCanvas();
+            if (canvas != null) {
+                dragListener = new MouseAdapter() {
+                    @Override public void mousePressed(MouseEvent e) {
+                        draggingLine = hitTest(canvas, e.getY());
+                    }
+                    @Override public void mouseDragged(MouseEvent e) {
+                        if (draggingLine < 0) return;
+                        int imgH = displayWindow.getHeight();
+                        if (imgH == 0) return;
+                        double frac = (double) canvas.offScreenY(e.getY()) / imgH;
+                        frac = Math.max(0.0, Math.min(1.0, frac));
+                        if (draggingLine == 0) originSp.setValue(frac);
+                        else                   frontSp.setValue(frac);
+                    }
+                    @Override public void mouseReleased(MouseEvent e) {
+                        if (draggingLine >= 0) {
+                            canvas.setCursor(Cursor.getDefaultCursor());
+                            draggingLine = -1;
+                        }
+                    }
+                    @Override public void mouseMoved(MouseEvent e) {
+                        canvas.setCursor(hitTest(canvas, e.getY()) >= 0
+                            ? Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR)
+                            : Cursor.getDefaultCursor());
+                    }
+                };
+                canvas.addMouseListener(dragListener);
+                canvas.addMouseMotionListener(dragListener);
+            }
+        }
+
+        private int hitTest(ImageCanvas canvas, int screenY) {
+            ImagePlus imp = getDisplayWindow();
+            if (imp == null) return -1;
+            int imgH = imp.getHeight();
+            float o = ((Number) originSp.getValue()).floatValue();
+            float f = ((Number) frontSp.getValue()).floatValue();
+            int dO = Math.abs(screenY - canvas.screenY((int)(o * imgH)));
+            int dF = Math.abs(screenY - canvas.screenY((int)(f * imgH)));
+            if (dO <= SNAP_PX && dO <= dF) return 0;
+            if (dF <= SNAP_PX)             return 1;
+            return -1;
         }
 
         private void updateLines() {
@@ -671,6 +720,14 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
+            ImagePlus imp = getDisplayWindow();
+            if (imp != null && dragListener != null && imp.getCanvas() != null) {
+                imp.getCanvas().removeMouseListener(dragListener);
+                imp.getCanvas().removeMouseMotionListener(dragListener);
+            }
+            dragListener = null;
+            draggingLine = -1;
+
             float o = ((Number) originSp.getValue()).floatValue();
             float f = ((Number) frontSp.getValue()).floatValue();
             if (o <= f) {
@@ -1040,7 +1097,15 @@ public class TlcDigitizerFrame extends JFrame {
             pathRow.add(new JLabel("Output file:"), BorderLayout.WEST);
             pathRow.add(pathField, BorderLayout.CENTER);
             pathRow.add(browse, BorderLayout.EAST);
-            add(pathRow, BorderLayout.CENTER);
+
+            // GridBagLayout with no weighty centres the pathRow vertically
+            // and stretches it horizontally — keeps the text field one line tall.
+            JPanel centre = new JPanel(new GridBagLayout());
+            GridBagConstraints gbc = new GridBagConstraints();
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.weightx = 1.0;
+            centre.add(pathRow, gbc);
+            add(centre, BorderLayout.CENTER);
         }
 
         @Override
