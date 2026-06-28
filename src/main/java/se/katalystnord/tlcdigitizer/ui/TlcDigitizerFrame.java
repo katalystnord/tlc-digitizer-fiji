@@ -810,6 +810,7 @@ public class TlcDigitizerFrame extends JFrame {
         private final List<List<Spot>> spotHistory = new ArrayList<List<Spot>>();
         private Overlay overlay;
         private MouseAdapter canvasListener;
+        private java.awt.event.AWTEventListener awtUndoListener;
         /** Pre-flattened image used for detection when Savitzky-Golay is selected. */
         private FloatProcessor flattenedForDetection;
 
@@ -819,7 +820,7 @@ public class TlcDigitizerFrame extends JFrame {
             add(instrPanel("<b>Drag the slider</b> to auto-detect spots (numbered yellow circles).<br>" +
                 "<b>To add a missed spot:</b> left-click the centre of the spot on the image. " +
                 "A circle sized to the local bright region will appear automatically.<br>" +
-                "<b>To remove a false positive:</b> right-click anywhere inside its circle.<br>" +
+                "<b>To remove a false positive:</b> Ctrl+click anywhere inside its circle.<br>" +
                 "<b>Ctrl+Z</b> undoes the last manual add or remove.<br>" +
                 "<i>Tip: moving the slider resets all manual edits — " +
                 "finish slider tuning before making manual corrections.</i>"), BorderLayout.NORTH);
@@ -899,14 +900,8 @@ public class TlcDigitizerFrame extends JFrame {
                         int ix = c.offScreenX(e.getX());
                         int iy = c.offScreenY(e.getY());
                         FloatProcessor src = source();
-                        if (SwingUtilities.isLeftMouseButton(e)) {
-                            pushSpotHistory();
-                            Spot found = SpotDetector.detectAtPoint(src, ix, iy, src.getHeight());
-                            int nextId = spots.isEmpty() ? 0
-                                : spots.stream().mapToInt(s -> s.id).max().getAsInt() + 1;
-                            spots.add(new Spot(nextId, found.centroidX, found.centroidY,
-                                found.radius, src.getHeight()));
-                        } else if (SwingUtilities.isRightMouseButton(e)) {
+                        if (SwingUtilities.isLeftMouseButton(e) && e.isControlDown()) {
+                            // Ctrl+click: remove nearest spot
                             Spot nearest = null;
                             float bestDist = Float.MAX_VALUE;
                             for (Spot s : spots) {
@@ -917,6 +912,12 @@ public class TlcDigitizerFrame extends JFrame {
                             if (nearest == null) return;
                             pushSpotHistory();
                             spots.remove(nearest);
+                        } else if (SwingUtilities.isLeftMouseButton(e) && !e.isControlDown()) {
+                            // Plain left-click: add spot
+                            pushSpotHistory();
+                            Spot found = SpotDetector.detectAtPoint(src, ix, iy, src.getHeight());
+                            spots.add(new Spot(0, found.centroidX, found.centroidY,
+                                found.radius, src.getHeight()));
                         } else {
                             return;
                         }
@@ -925,6 +926,24 @@ public class TlcDigitizerFrame extends JFrame {
                 };
                 canvas.addMouseListener(canvasListener);
             }
+
+            // Intercept Ctrl+Z system-wide while Step 5 is active.
+            // ImageCanvas lives in a separate JFrame so WHEN_IN_FOCUSED_WINDOW bindings
+            // on TlcDigitizerFrame don't fire when the canvas has focus.  An AWTEventListener
+            // runs before any window processes the key, so we can consume it here.
+            int undoMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+            awtUndoListener = event -> {
+                if (!(event instanceof KeyEvent)) return;
+                KeyEvent ke = (KeyEvent) event;
+                if (ke.getID() == KeyEvent.KEY_PRESSED
+                        && ke.getKeyCode() == KeyEvent.VK_Z
+                        && (ke.getModifiers() & undoMask) != 0) {
+                    ke.consume();
+                    SwingUtilities.invokeLater(Step5Panel.this::undoSpotEdit);
+                }
+            };
+            Toolkit.getDefaultToolkit().addAWTEventListener(
+                    awtUndoListener, AWTEvent.KEY_EVENT_MASK);
 
             detect();
         }
@@ -941,11 +960,25 @@ public class TlcDigitizerFrame extends JFrame {
         }
 
         private void refreshOverlay() {
+            // Always assign final IDs before drawing so the overlay matches Step 6.
+            renumberXFirst(spots, source().getHeight());
             ImagePlus imp = getDisplayWindow();
-            if (imp == null || overlay == null) return;
+            if (imp == null) return;
+            // Create a fresh Overlay every time — reusing and clearing the old one
+            // leaves stale TextRoi ghosts in ImageJ's render cache.
+            overlay = new Overlay();
             updateSpotOverlay(overlay, imp, spots);
             int n = spots.size();
             countLabel.setText(n + " spot" + (n == 1 ? "" : "s") + " detected");
+        }
+
+        private void renumberXFirst(List<Spot> list, int imageHeight) {
+            list.sort(Comparator.comparingDouble((Spot s) -> (double) s.centroidX)
+                .thenComparingDouble(s -> (double) s.centroidY));
+            for (int i = 0; i < list.size(); i++) {
+                Spot o = list.get(i);
+                list.set(i, new Spot(i + 1, o.centroidX, o.centroidY, o.radius, imageHeight));
+            }
         }
 
         void undoSpotEdit() {
@@ -961,12 +994,16 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
-            // Detach mouse listener before finalising
+            // Detach listeners before finalising
             ImagePlus imp = getDisplayWindow();
             if (imp != null && canvasListener != null && imp.getCanvas() != null) {
                 imp.getCanvas().removeMouseListener(canvasListener);
             }
             canvasListener = null;
+            if (awtUndoListener != null) {
+                Toolkit.getDefaultToolkit().removeAWTEventListener(awtUndoListener);
+                awtUndoListener = null;
+            }
 
             if (spots.isEmpty()) {
                 IJ.error("Step 5 — No Spots",
@@ -976,17 +1013,9 @@ public class TlcDigitizerFrame extends JFrame {
 
             state.thresholdFactor = slider.getValue() / 100.0;
 
-            // Re-sort left-to-right (lane), then top-to-bottom within each lane,
-            // so spots belonging to the same lane get adjacent IDs.
-            List<Spot> sorted = new ArrayList<Spot>(spots);
-            sorted.sort(Comparator.comparingDouble((Spot s) -> (double) s.centroidX)
-                .thenComparingDouble(s -> (double) s.centroidY));
-            int h = state.corrected.getHeight();
-            state.spots = new ArrayList<Spot>();
-            for (int i = 0; i < sorted.size(); i++) {
-                Spot old = sorted.get(i);
-                state.spots.add(new Spot(i, old.centroidX, old.centroidY, old.radius, h));
-            }
+            // Spots are already sorted X-first and renumbered by refreshOverlay();
+            // just copy the final list into state.
+            state.spots = new ArrayList<Spot>(spots);
 
             LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
             RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
@@ -1228,6 +1257,8 @@ public class TlcDigitizerFrame extends JFrame {
             label.setName("label_" + s.id);
             ov.add(label);
         }
+        imp.killRoi();         // clear any ROI ImageJ selected from the overlay on click
+        imp.setOverlay(ov);
         IJ.showStatus(spots.size() + " spots");
         imp.updateAndDraw();
     }
