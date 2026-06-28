@@ -5,6 +5,7 @@ import ij.ImagePlus;
 import ij.gui.Overlay;
 import ij.gui.OvalRoi;
 import ij.gui.TextRoi;
+import ij.io.FileSaver;
 import ij.process.FloatProcessor;
 import se.katalystnord.tlcdigitizer.model.AnalysisState;
 import se.katalystnord.tlcdigitizer.model.Spot;
@@ -13,38 +14,74 @@ import java.awt.*;
 import java.io.File;
 
 /**
- * Saves an annotated PNG of the processed plate image with spot circles and ID
- * labels burned in.  Intended to be saved alongside the CSV so the user can
- * correlate spot IDs to physical plate positions after the session ends.
+ * Saves the processed plate image with spot circles and ID labels burned in.
+ *
+ * <p>Two output formats:
+ * <ul>
+ *   <li>{@link #exportPng} — flattened RGB PNG, for easy viewing alongside the CSV.</li>
+ *   <li>{@link #exportTiff} — same image saved as TIFF with the full CSV analysis
+ *       results embedded in the ImageDescription tag (TIFF tag 270).  A single
+ *       {@code .tif} file thus contains both the visual record and all numerical
+ *       results, suitable for long-term archiving.</li>
+ * </ul>
  */
 public final class AnnotatedImageExporter {
 
     private AnnotatedImageExporter() {}
 
-    /**
-     * Derives the PNG output path from a CSV path by replacing the {@code .csv}
-     * extension with {@code .png}.  If the CSV path has no {@code .csv} suffix,
-     * {@code .png} is appended.
-     */
+    // -------------------------------------------------------------------------
+    // Path helpers
+    // -------------------------------------------------------------------------
+
+    /** Derives the PNG output path from a CSV path (replaces {@code .csv} with {@code .png}). */
     public static File pngFileFor(File csvFile) {
-        String path = csvFile.getAbsolutePath();
+        return siblingWithExtension(csvFile, ".png");
+    }
+
+    /** Derives the TIFF output path from a CSV path (replaces {@code .csv} with {@code .tif}). */
+    public static File tiffFileFor(File csvFile) {
+        return siblingWithExtension(csvFile, ".tif");
+    }
+
+    private static File siblingWithExtension(File base, String ext) {
+        String path = base.getAbsolutePath();
         if (path.toLowerCase().endsWith(".csv")) {
             path = path.substring(0, path.length() - 4);
         }
-        return new File(path + ".png");
+        return new File(path + ext);
+    }
+
+    // -------------------------------------------------------------------------
+    // Export methods
+    // -------------------------------------------------------------------------
+
+    /** Saves the annotated plate image as a PNG. */
+    public static void exportPng(AnalysisState state, File outputFile) {
+        ImagePlus flat = buildAnnotatedImage(state).flatten();
+        IJ.saveAs(flat, "PNG", outputFile.getAbsolutePath());
     }
 
     /**
-     * Converts the background-corrected plate image to an annotated PNG:
-     * <ul>
-     *   <li>8-bit → RGB conversion with auto-contrast</li>
-     *   <li>Yellow circle per spot (same geometry as the Step 5 overlay)</li>
-     *   <li>Yellow spot ID label centred inside each circle</li>
-     * </ul>
-     * The overlay is flattened (burned into pixels) before saving so the file
-     * is self-contained and readable in any viewer.
+     * Saves the annotated plate image as a TIFF with the full CSV analysis results
+     * embedded in the ImageDescription tag (TIFF tag 270).
+     *
+     * <p>The embedded text can be retrieved in Fiji via Image › Show Info…,
+     * with {@code exiftool -ImageDescription file.tif}, or programmatically
+     * via any TIFF library (e.g. Python {@code tifffile}).
+     *
+     * @param csvContent the CSV string as returned by {@link CsvExporter#toCsvString}
      */
-    public static void export(AnalysisState state, File outputFile) {
+    public static void exportTiff(AnalysisState state, String csvContent, File outputFile) {
+        ImagePlus flat = buildAnnotatedImage(state).flatten();
+        flat.setProperty("Info", csvContent);
+        new FileSaver(flat).saveAsTiff(outputFile.getAbsolutePath());
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared image construction
+    // -------------------------------------------------------------------------
+
+    private static ImagePlus buildAnnotatedImage(AnalysisState state) {
         FloatProcessor fp = (FloatProcessor) state.corrected.duplicate();
         fp.resetMinAndMax();
         ImagePlus imp = new ImagePlus("annotated",
@@ -69,8 +106,6 @@ public final class AnnotatedImageExporter {
             ov.add(label);
         }
         imp.setOverlay(ov);
-
-        ImagePlus flat = imp.flatten();
-        IJ.saveAs(flat, "PNG", outputFile.getAbsolutePath());
+        return imp;
     }
 }

@@ -1126,10 +1126,12 @@ public class TlcDigitizerFrame extends JFrame {
 
         Step7Panel() {
             setLayout(new BorderLayout(0, 12));
-            add(instrPanel("Save results to a CSV file.<br>" +
-                "An annotated PNG (<i>same name, .png extension</i>) is saved alongside it " +
-                "so you can match spot IDs to physical plate positions. " +
-                "Spot IDs are assigned left-to-right by lane, top-to-bottom within each lane."),
+            add(instrPanel("Saves three files from a single base path:<br>" +
+                "<b>.csv</b> — numerical results + analysis parameters &nbsp;|&nbsp; " +
+                "<b>.png</b> — annotated plate image for spot identification &nbsp;|&nbsp; " +
+                "<b>.tif</b> — same image with the full CSV embedded in the metadata " +
+                "(open in Fiji › Image › Show Info… to retrieve). " +
+                "Spot IDs run left-to-right by lane, top-to-bottom within each lane."),
                 BorderLayout.NORTH);
 
             String defaultPath = System.getProperty("user.home")
@@ -1173,16 +1175,21 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
-            File csvOut = new File(pathField.getText().trim());
-            File pngOut = AnnotatedImageExporter.pngFileFor(csvOut);
+            File csvOut  = new File(pathField.getText().trim());
+            File pngOut  = AnnotatedImageExporter.pngFileFor(csvOut);
+            File tiffOut = AnnotatedImageExporter.tiffFileFor(csvOut);
             try {
+                String csv = CsvExporter.toCsvString(state);
                 CsvExporter.export(state, csvOut);
-                AnnotatedImageExporter.export(state, pngOut);
+                AnnotatedImageExporter.exportPng(state, pngOut);
+                AnnotatedImageExporter.exportTiff(state, csv, tiffOut);
                 IJ.showMessage("TLC Digitizer — Export Complete",
-                    "CSV:   " + csvOut.getAbsolutePath() + "\n" +
-                    "Image: " + pngOut.getAbsolutePath());
-                IJ.log("[Step 7] CSV saved to:   " + csvOut.getAbsolutePath());
-                IJ.log("[Step 7] Image saved to: " + pngOut.getAbsolutePath());
+                    "CSV:  " + csvOut.getAbsolutePath()  + "\n" +
+                    "PNG:  " + pngOut.getAbsolutePath()  + "\n" +
+                    "TIFF: " + tiffOut.getAbsolutePath());
+                IJ.log("[Step 7] CSV  saved: " + csvOut.getAbsolutePath());
+                IJ.log("[Step 7] PNG  saved: " + pngOut.getAbsolutePath());
+                IJ.log("[Step 7] TIFF saved: " + tiffOut.getAbsolutePath());
             } catch (IOException e) {
                 IJ.error("Export Failed", e.getMessage());
                 return false;

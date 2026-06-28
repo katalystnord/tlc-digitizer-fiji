@@ -25,15 +25,26 @@ public final class CsvExporter {
     private CsvExporter() {}
 
     /**
+     * Returns the full analysis results as a UTF-8 CSV string.
+     * Used both for writing to disk and for embedding in TIFF metadata.
+     */
+    public static String toCsvString(AnalysisState state) {
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        writeMetadata(pw, state);
+        writeCalibration(pw, state.calibrationModel);
+        writeSpots(pw, state);
+        pw.flush();
+        return sw.toString();
+    }
+
+    /**
      * Writes analysis results to {@code outputFile} in UTF-8 CSV format.
      */
     public static void export(AnalysisState state, File outputFile) throws IOException {
-        try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(
-                new FileOutputStream(outputFile), "UTF-8"))) {
-
-            writeMetadata(pw, state);
-            writeCalibration(pw, state.calibrationModel);
-            writeSpots(pw, state);
+        try (OutputStreamWriter ow = new OutputStreamWriter(
+                new FileOutputStream(outputFile), "UTF-8")) {
+            ow.write(toCsvString(state));
         }
     }
 
