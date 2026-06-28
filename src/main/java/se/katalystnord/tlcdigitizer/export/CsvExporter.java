@@ -43,7 +43,8 @@ public final class CsvExporter {
         if (state.originalImage != null) {
             pw.println("# Source image: " + state.originalImage.getTitle());
         }
-        pw.println("# Background method: " + (state.usedPolynomialBackground ? "polynomial (Option A)" : "Savitzky-Golay (Option B)"));
+        pw.println("# Image inverted: " + state.invertImage);
+        pw.println("# Background method: " + (state.usedPolynomialBackground ? "polynomial (Option A)" : "Savitzky-Golay (Option B, degree " + state.sgDegree + ")"));
         pw.println("# Threshold factor: " + state.thresholdFactor);
         pw.println("# Origin Y fraction: " + state.originYFraction);
         pw.println("# Front Y fraction: " + state.frontYFraction);

@@ -10,6 +10,7 @@ import ij.gui.PointRoi;
 import ij.gui.TextRoi;
 import ij.process.FloatPolygon;
 import ij.process.FloatProcessor;
+import se.katalystnord.tlcdigitizer.export.AnnotatedImageExporter;
 import se.katalystnord.tlcdigitizer.export.CsvExporter;
 import se.katalystnord.tlcdigitizer.model.AnalysisState;
 import se.katalystnord.tlcdigitizer.model.Spot;
@@ -973,10 +974,11 @@ public class TlcDigitizerFrame extends JFrame {
 
             state.thresholdFactor = slider.getValue() / 100.0;
 
-            // Re-sort top-to-bottom, reassign clean sequential IDs
+            // Re-sort left-to-right (lane), then top-to-bottom within each lane,
+            // so spots belonging to the same lane get adjacent IDs.
             List<Spot> sorted = new ArrayList<Spot>(spots);
-            sorted.sort(Comparator.comparingDouble((Spot s) -> (double) s.centroidY)
-                .thenComparingDouble(s -> (double) s.centroidX));
+            sorted.sort(Comparator.comparingDouble((Spot s) -> (double) s.centroidX)
+                .thenComparingDouble(s -> (double) s.centroidY));
             int h = state.corrected.getHeight();
             state.spots = new ArrayList<Spot>();
             for (int i = 0; i < sorted.size(); i++) {
@@ -1124,8 +1126,10 @@ public class TlcDigitizerFrame extends JFrame {
 
         Step7Panel() {
             setLayout(new BorderLayout(0, 12));
-            add(instrPanel("Save all results and analysis parameters to a CSV file.<br>" +
-                "The file includes a full metadata header for reproducibility."),
+            add(instrPanel("Save results to a CSV file.<br>" +
+                "An annotated PNG (<i>same name, .png extension</i>) is saved alongside it " +
+                "so you can match spot IDs to physical plate positions. " +
+                "Spot IDs are assigned left-to-right by lane, top-to-bottom within each lane."),
                 BorderLayout.NORTH);
 
             String defaultPath = System.getProperty("user.home")
@@ -1169,12 +1173,16 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
-            File out = new File(pathField.getText().trim());
+            File csvOut = new File(pathField.getText().trim());
+            File pngOut = AnnotatedImageExporter.pngFileFor(csvOut);
             try {
-                CsvExporter.export(state, out);
+                CsvExporter.export(state, csvOut);
+                AnnotatedImageExporter.export(state, pngOut);
                 IJ.showMessage("TLC Digitizer — Export Complete",
-                    "Results saved to:\n" + out.getAbsolutePath());
-                IJ.log("[Step 7] Results saved to: " + out.getAbsolutePath());
+                    "CSV:   " + csvOut.getAbsolutePath() + "\n" +
+                    "Image: " + pngOut.getAbsolutePath());
+                IJ.log("[Step 7] CSV saved to:   " + csvOut.getAbsolutePath());
+                IJ.log("[Step 7] Image saved to: " + pngOut.getAbsolutePath());
             } catch (IOException e) {
                 IJ.error("Export Failed", e.getMessage());
                 return false;
