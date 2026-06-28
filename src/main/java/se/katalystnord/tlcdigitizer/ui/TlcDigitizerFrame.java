@@ -378,12 +378,15 @@ public class TlcDigitizerFrame extends JFrame {
     class Step1Panel extends AbstractStepPanel {
         private JRadioButton luminanceBtn;
         private JRadioButton greenBtn;
+        private JCheckBox invertBox;
 
         Step1Panel() {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             add(instrPanel("Convert the raw image to greyscale.<br>" +
                 "For UV-fluorescence plates (dark background, bright spots), " +
-                "try <b>Green channel</b> for better spot contrast."));
+                "try <b>Green channel</b> for better spot contrast.<br>" +
+                "Check <b>Invert</b> for stained or UV&nbsp;254&nbsp;nm plates " +
+                "where spots are <i>darker</i> than the background."));
             add(Box.createVerticalStrut(14));
 
             luminanceBtn = new JRadioButton(
@@ -398,6 +401,13 @@ public class TlcDigitizerFrame extends JFrame {
             add(luminanceBtn);
             add(Box.createVerticalStrut(6));
             add(greenBtn);
+            add(Box.createVerticalStrut(12));
+
+            invertBox = new JCheckBox(
+                "<html><b>Invert</b> — dark spots on bright background " +
+                "<small style='color:gray'>(stained plates, UV 254 nm)</small></html>");
+            invertBox.setAlignmentX(LEFT_ALIGNMENT);
+            add(invertBox);
         }
 
         @Override
@@ -408,12 +418,14 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
-            if (greenBtn.isSelected()) {
-                state.grayscale = ImagePreparation.extractGreenChannel(state.originalImage);
-            } else {
-                state.grayscale = ImagePreparation.toLuminanceGrayscale(state.originalImage);
-            }
-            IJ.log("[Step 1] Greyscale: " + (greenBtn.isSelected() ? "green channel" : "luminance"));
+            FloatProcessor fp = greenBtn.isSelected()
+                ? ImagePreparation.extractGreenChannel(state.originalImage)
+                : ImagePreparation.toLuminanceGrayscale(state.originalImage);
+            state.invertImage = invertBox.isSelected();
+            if (state.invertImage) fp.invert();
+            state.grayscale = fp;
+            IJ.log("[Step 1] Greyscale: " + (greenBtn.isSelected() ? "green channel" : "luminance")
+                + (state.invertImage ? " (inverted)" : ""));
             return true;
         }
     }
@@ -791,7 +803,6 @@ public class TlcDigitizerFrame extends JFrame {
     class Step5Panel extends AbstractStepPanel {
         private JSlider slider;
         private JSpinner multSp;
-        private JCheckBox invertBox;
         private JLabel countLabel;
 
         private List<Spot> spots = new ArrayList<Spot>();
@@ -820,8 +831,6 @@ public class TlcDigitizerFrame extends JFrame {
             multSp.setEditor(new JSpinner.NumberEditor(multSp, "0.00"));
             ((JSpinner.NumberEditor) multSp.getEditor()).getTextField().setColumns(4);
 
-            invertBox = new JCheckBox(
-                "Invert  (dark spots on bright background — UV 254 nm / charring)");
             countLabel = new JLabel(" ");
             countLabel.setFont(countLabel.getFont().deriveFont(Font.BOLD, 13f));
 
@@ -837,7 +846,6 @@ public class TlcDigitizerFrame extends JFrame {
                 if (slider.getValue() != sv) slider.setValue(sv);
                 detect();
             });
-            invertBox.addActionListener(e -> detect());
 
             JPanel sliderRow = new JPanel(new BorderLayout(4, 0));
             sliderRow.add(new JLabel("0.1×"), BorderLayout.WEST);
@@ -854,8 +862,6 @@ public class TlcDigitizerFrame extends JFrame {
             controls.add(sliderRow);
             controls.add(Box.createVerticalStrut(4));
             controls.add(spinRow);
-            controls.add(Box.createVerticalStrut(8));
-            controls.add(invertBox);
             controls.add(Box.createVerticalStrut(6));
             controls.add(countLabel);
             add(controls, BorderLayout.CENTER);
@@ -921,14 +927,7 @@ public class TlcDigitizerFrame extends JFrame {
         }
 
         private FloatProcessor source() {
-            FloatProcessor base = (flattenedForDetection != null)
-                    ? flattenedForDetection : state.corrected;
-            if (invertBox.isSelected()) {
-                FloatProcessor fp = (FloatProcessor) base.duplicate();
-                fp.invert();
-                return fp;
-            }
-            return base;
+            return (flattenedForDetection != null) ? flattenedForDetection : state.corrected;
         }
 
         private void detect() {

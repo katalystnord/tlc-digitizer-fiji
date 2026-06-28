@@ -55,6 +55,9 @@ public class AnalysisState {
      */
     public FloatProcessor perspCorrected;
 
+    /** True when the plate has dark spots on a bright background (staining, UV 254 nm). */
+    public boolean invertImage = false;
+
     /** Whether background correction used the polynomial (A) or Savitzky-Golay (B) method. */
     public boolean usedPolynomialBackground = true;
 
