@@ -35,16 +35,67 @@ public class CalibrationModelTest {
 
     @Test
     public void fit_tooFewReferences_throwsException() {
-        // Minimum is now 2 (mathematical minimum for linear regression);
-        // the UI warns for < 3 but CalibrationModel.fit itself requires >= 2.
         List<Spot> refs = new ArrayList<>();
         refs.add(makeRef(0, 100, 200));
-
         try {
             CalibrationModel.fit(refs);
             fail("Should have thrown IllegalArgumentException");
         } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("2"));
+        }
+    }
+
+    @Test
+    public void fitLogLog_perfectPowerLaw_rSquaredNearOne() {
+        // concentration = 0.01 × signal^2  →  log(conc) = log(0.01) + 2×log(signal)
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 100,   100));
+        refs.add(makeRef(1, 200,   400));
+        refs.add(makeRef(2, 400,  1600));
+        refs.add(makeRef(3, 800,  6400));
+
+        CalibrationModel m = CalibrationModel.fit(refs, CalibrationModel.ModelType.LOG_LOG);
+        assertEquals("R² should be ~1", 1.0, m.rSquared, 0.001);
+        assertEquals("Exponent should be ~2", 2.0, m.coefficients[1], 0.01);
+        assertTrue("LOD should be NaN for log-log", Double.isNaN(m.lod));
+    }
+
+    @Test
+    public void fitLogLog_predict_recoversKnownValue() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 100,   100));
+        refs.add(makeRef(1, 200,   400));
+        refs.add(makeRef(2, 400,  1600));
+
+        CalibrationModel m = CalibrationModel.fit(refs, CalibrationModel.ModelType.LOG_LOG);
+        assertEquals("Predict at reference point", 400.0, m.predict(200), 1.0);
+    }
+
+    @Test
+    public void fitQuadratic_perfectQuadraticData_rSquaredNearOne() {
+        // concentration = 0.5×signal² + 0×signal + 0
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 10,    50));
+        refs.add(makeRef(1, 20,   200));
+        refs.add(makeRef(2, 30,   450));
+        refs.add(makeRef(3, 40,   800));
+
+        CalibrationModel m = CalibrationModel.fit(refs, CalibrationModel.ModelType.QUADRATIC);
+        assertEquals("R² should be ~1", 1.0, m.rSquared, 0.001);
+        assertEquals("Quadratic coeff a2 should be ~0.5", 0.5, m.coefficients[2], 0.01);
+        assertTrue("LOD should be NaN for quadratic", Double.isNaN(m.lod));
+    }
+
+    @Test
+    public void fitQuadratic_tooFewPoints_throwsException() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 100, 200));
+        refs.add(makeRef(1, 200, 400));
+        try {
+            CalibrationModel.fit(refs, CalibrationModel.ModelType.QUADRATIC);
+            fail("Should have thrown IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("3"));
         }
     }
 

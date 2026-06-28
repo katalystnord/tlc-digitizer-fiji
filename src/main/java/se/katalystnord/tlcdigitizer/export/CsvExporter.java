@@ -69,13 +69,33 @@ public final class CsvExporter {
         if (cal == null) {
             pw.println("# Calibration: not performed");
         } else {
-            pw.println("# Calibration: " + cal.toSummary());
-            pw.println("# slope: " + cal.slope);
-            pw.println("# intercept: " + cal.intercept);
+            pw.println("# Calibration model: " + cal.modelType.name());
+            pw.println("# Calibration summary: " + cal.toSummary());
             pw.println("# R_squared: " + cal.rSquared);
-            pw.println("# LOD: " + cal.lod);
-            pw.println("# LOQ: " + cal.loq);
+            pw.println("# RMSE_concentration: " + cal.rmse);
             pw.println("# n_calibration_points: " + cal.nPoints);
+            switch (cal.modelType) {
+                case LINEAR:
+                    pw.println("# slope: " + cal.slope);
+                    pw.println("# intercept: " + cal.intercept);
+                    pw.println("# LOD: " + cal.lod);
+                    pw.println("# LOQ: " + cal.loq);
+                    pw.println("# LOD_LOQ_method: ICH_Q2R1_regression (3.3sigma/slope, 10sigma/slope)");
+                    break;
+                case LOG_LOG:
+                    pw.println("# exponent: " + cal.coefficients[1]);
+                    pw.println("# prefactor: " + Math.exp(cal.coefficients[0]));
+                    pw.println("# LOD: NA (log-log model — compute from residuals manually)");
+                    pw.println("# LOQ: NA (log-log model — compute from residuals manually)");
+                    break;
+                case QUADRATIC:
+                    pw.println("# a2: " + cal.coefficients[2]);
+                    pw.println("# a1: " + cal.coefficients[1]);
+                    pw.println("# a0: " + cal.coefficients[0]);
+                    pw.println("# LOD: NA (quadratic model — compute from residuals manually)");
+                    pw.println("# LOQ: NA (quadratic model — compute from residuals manually)");
+                    break;
+            }
         }
         pw.println("#");
     }

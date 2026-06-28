@@ -1046,12 +1046,43 @@ public class TlcDigitizerFrame extends JFrame {
         private JScrollPane scroll;
         private final List<JCheckBox> refBoxes    = new ArrayList<JCheckBox>();
         private final List<JSpinner>  concSpinners = new ArrayList<JSpinner>();
+        private final ButtonGroup modelGroup = new ButtonGroup();
+        private final JRadioButton[] modelButtons =
+                new JRadioButton[CalibrationModel.ModelType.values().length];
+        private JLabel modelDesc;
 
         Step6Panel() {
             setLayout(new BorderLayout(0, 8));
-            add(instrPanel("Tick the <b>Reference</b> checkbox for each calibration standard spot " +
+
+            // --- instruction + model selector (stacked in NORTH) ---
+            JPanel north = new JPanel();
+            north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
+            north.add(instrPanel("Tick the <b>Reference</b> checkbox for each calibration standard spot " +
                 "and enter its known concentration. At least 3 reference spots are required " +
-                "(ICH&nbsp;Q2(R1))."), BorderLayout.NORTH);
+                "(ICH&nbsp;Q2(R1))."));
+
+            JPanel modelPanel = new JPanel(new BorderLayout(0, 2));
+            modelPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(6, 0, 8, 0)));
+            JPanel radios = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            CalibrationModel.ModelType[] types = CalibrationModel.ModelType.values();
+            for (int i = 0; i < types.length; i++) {
+                modelButtons[i] = new JRadioButton(types[i].label);
+                modelButtons[i].setFont(modelButtons[i].getFont().deriveFont(12f));
+                final CalibrationModel.ModelType t = types[i];
+                modelButtons[i].addActionListener(e -> modelDesc.setText(t.description));
+                modelGroup.add(modelButtons[i]);
+                radios.add(modelButtons[i]);
+            }
+            modelButtons[0].setSelected(true);  // LINEAR default
+            modelDesc = new JLabel(types[0].description);
+            modelDesc.setFont(modelDesc.getFont().deriveFont(Font.ITALIC, 11f));
+            modelDesc.setForeground(Color.DARK_GRAY);
+            modelPanel.add(radios, BorderLayout.CENTER);
+            modelPanel.add(modelDesc, BorderLayout.SOUTH);
+            north.add(modelPanel);
+            add(north, BorderLayout.NORTH);
 
             rows = new JPanel(new GridLayout(0, 4, 6, 3));
             scroll = new JScrollPane(rows);
@@ -1136,8 +1167,13 @@ public class TlcDigitizerFrame extends JFrame {
                 if (choice != JOptionPane.YES_OPTION) return false;
             }
 
+            CalibrationModel.ModelType modelType = CalibrationModel.ModelType.LINEAR;
+            CalibrationModel.ModelType[] types = CalibrationModel.ModelType.values();
+            for (int i = 0; i < modelButtons.length; i++) {
+                if (modelButtons[i].isSelected()) { modelType = types[i]; break; }
+            }
             try {
-                state.calibrationModel = CalibrationModel.fit(refs);
+                state.calibrationModel = CalibrationModel.fit(refs, modelType);
                 state.calibrationModel.applyTo(state.spots);
                 IJ.log("[Step 6] " + state.calibrationModel.toSummary());
             } catch (IllegalArgumentException e) {
