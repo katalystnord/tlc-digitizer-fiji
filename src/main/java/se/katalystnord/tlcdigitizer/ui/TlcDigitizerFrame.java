@@ -681,7 +681,11 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         void onEnter() {
-            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 4 · Rf Lines");
+            // Show the perspective-corrected (pre-background) image so the plate
+            // structure is clearly visible for line placement.
+            FloatProcessor display4 = (state.perspCorrected != null)
+                    ? state.perspCorrected : state.corrected;
+            setDisplay(display4.duplicate(), "TLC Digitizer — Step 4 · Rf Lines");
             overlay = new Overlay();
             displayWindow.setOverlay(overlay);
             updateLines();
