@@ -1063,6 +1063,9 @@ public class TlcDigitizerFrame extends JFrame {
         private JSpinner manualLoqSpinner;
         private double cachedBgSigma = Double.NaN;
 
+        // Calibration results strip (SOUTH) — populated after fitting
+        private JLabel calResultsLabel;
+
         Step6Panel() {
             setLayout(new BorderLayout(0, 8));
 
@@ -1167,6 +1170,14 @@ public class TlcDigitizerFrame extends JFrame {
             scroll = new JScrollPane(rows);
             scroll.setPreferredSize(new Dimension(420, 240));
             add(scroll, BorderLayout.CENTER);
+
+            calResultsLabel = new JLabel(
+                "<html><body style='width:480px;color:gray;font-style:italic'>" +
+                "Calibration results will appear here after clicking Next.</body></html>");
+            calResultsLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(5, 4, 5, 4)));
+            add(calResultsLabel, BorderLayout.SOUTH);
         }
 
         @Override
@@ -1210,6 +1221,15 @@ public class TlcDigitizerFrame extends JFrame {
                 snSigmaLabel.setText(Double.isNaN(cachedBgSigma)
                     ? "σ_bg = unavailable (too few background pixels)"
                     : String.format("σ_bg = %.4g  (background pixel SD)", cachedBgSigma));
+            }
+
+            // Restore results strip if model was already fitted (back-navigation)
+            if (state.calibrationModel != null) {
+                calResultsLabel.setText(buildCalibResultsHtml(state.calibrationModel));
+            } else {
+                calResultsLabel.setText(
+                    "<html><body style='width:480px;color:gray;font-style:italic'>" +
+                    "Calibration results will appear here after clicking Next.</body></html>");
             }
 
             setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 6 · Calibrate");
@@ -1297,11 +1317,49 @@ public class TlcDigitizerFrame extends JFrame {
 
                 state.calibrationModel.applyTo(state.spots);
                 IJ.log("[Step 6] " + state.calibrationModel.toSummary());
+
+                // Show calibration quality summary before advancing to Step 7
+                calResultsLabel.setText(buildCalibResultsHtml(state.calibrationModel));
+                JOptionPane.showMessageDialog(
+                    TlcDigitizerFrame.this,
+                    buildCalibResultsHtml(state.calibrationModel),
+                    "Step 6 — Calibration Results",
+                    JOptionPane.INFORMATION_MESSAGE);
             } catch (IllegalArgumentException e) {
                 IJ.error("Step 6 — Calibration Error", e.getMessage());
                 return false;
             }
             return true;
+        }
+
+        private String buildCalibResultsHtml(CalibrationModel m) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("<html><body style='width:480px'>");
+            sb.append("<b>").append(m.modelType.label).append("</b>");
+            sb.append("&nbsp;&nbsp;n&nbsp;=&nbsp;").append(m.nPoints);
+            sb.append("&nbsp;&nbsp;R²&nbsp;=&nbsp;").append(String.format("%.4f", m.rSquared));
+            sb.append("&nbsp;&nbsp;RMSE&nbsp;=&nbsp;").append(String.format("%.4g", m.rmse));
+            if (m.modelType == CalibrationModel.ModelType.LINEAR) {
+                sb.append("<br>slope&nbsp;=&nbsp;").append(String.format("%.4g", m.slope));
+                sb.append("&nbsp;&nbsp;intercept&nbsp;=&nbsp;").append(String.format("%.4g", m.intercept));
+                if (!Double.isNaN(m.lod) && !Double.isNaN(m.loq)) {
+                    sb.append("<br>LOD&nbsp;=&nbsp;<b>").append(String.format("%.4g", m.lod)).append("</b>");
+                    sb.append("&nbsp;&nbsp;LOQ&nbsp;=&nbsp;<b>").append(String.format("%.4g", m.loq)).append("</b>");
+                    sb.append("&nbsp;&nbsp;<i>(").append(m.lodLoqConvention.label).append(")</i>");
+                } else {
+                    sb.append("<br><i>LOD/LOQ: not computed (zero slope)</i>");
+                }
+            } else if (m.modelType == CalibrationModel.ModelType.LOG_LOG) {
+                sb.append("<br>exponent&nbsp;=&nbsp;").append(String.format("%.4g", m.coefficients[1]));
+                sb.append("&nbsp;&nbsp;prefactor&nbsp;=&nbsp;").append(
+                    String.format("%.4g", Math.exp(m.coefficients[0])));
+            } else if (m.modelType == CalibrationModel.ModelType.QUADRATIC) {
+                sb.append("<br>a₂&nbsp;=&nbsp;").append(String.format("%.4g", m.coefficients[2]));
+                sb.append("&nbsp;&nbsp;a₁&nbsp;=&nbsp;").append(String.format("%.4g", m.coefficients[1]));
+                sb.append("&nbsp;&nbsp;a₀&nbsp;=&nbsp;").append(String.format("%.4g", m.coefficients[0]));
+            }
+            sb.append("</body></html>");
+            return sb.toString();
         }
     }
 
