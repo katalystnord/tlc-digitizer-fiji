@@ -554,19 +554,21 @@ public class TlcDigitizerFrame extends JFrame {
     class Step3Panel extends AbstractStepPanel {
         private JRadioButton polynomialBtn;
         private JRadioButton sgBtn;
+        private JSpinner sgDegreeSp;
 
         Step3Panel() {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             add(instrPanel("Correct for uneven plate illumination.<br>" +
-                "<b>Quartic polynomial</b> fits a 2-D surface to the plate background — " +
+                "<b>Quartic polynomial</b> fits a 2-D surface to the whole plate — " +
                 "best for most plates (TLCyzer method).<br>" +
-                "Savitzky-Golay is better for non-uniform charring or sulphuric-acid plates."));
+                "<b>Savitzky-Golay</b> estimates background locally per spot — better for " +
+                "non-uniform charring or sulphuric-acid stained plates."));
             add(Box.createVerticalStrut(14));
 
             polynomialBtn = new JRadioButton(
                 "<html><b>Quartic polynomial</b> &nbsp;<small style='color:gray'>(recommended)</small></html>",
                 true);
-            sgBtn = new JRadioButton("Savitzky-Golay per-spot polynomial");
+            sgBtn = new JRadioButton("<html><b>Savitzky-Golay</b> per-spot polynomial</html>");
             ButtonGroup grp = new ButtonGroup();
             grp.add(polynomialBtn);
             grp.add(sgBtn);
@@ -575,6 +577,34 @@ public class TlcDigitizerFrame extends JFrame {
             add(polynomialBtn);
             add(Box.createVerticalStrut(6));
             add(sgBtn);
+
+            // S-G options panel — shown only when Savitzky-Golay is selected
+            JPanel sgOptions = new JPanel();
+            sgOptions.setLayout(new BoxLayout(sgOptions, BoxLayout.Y_AXIS));
+            sgOptions.setAlignmentX(LEFT_ALIGNMENT);
+            sgOptions.setBorder(BorderFactory.createEmptyBorder(4, 22, 0, 0));
+
+            sgDegreeSp = new JSpinner(new SpinnerNumberModel(
+                    BackgroundCorrection.DEFAULT_SG_DEGREE, 1, 8, 1));
+            ((JSpinner.DefaultEditor) sgDegreeSp.getEditor()).getTextField().setColumns(2);
+            JPanel degreeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            degreeRow.add(new JLabel("Polynomial degree:"));
+            degreeRow.add(sgDegreeSp);
+            degreeRow.add(new JLabel(
+                "<html><small style='color:gray'>(1–8, default 5)</small></html>"));
+            degreeRow.setAlignmentX(LEFT_ALIGNMENT);
+
+            JLabel deferredNote = new JLabel(
+                "<html><small><i>Correction is applied in Step 5 after spot detection.</i></small></html>");
+            deferredNote.setAlignmentX(LEFT_ALIGNMENT);
+
+            sgOptions.add(degreeRow);
+            sgOptions.add(Box.createVerticalStrut(4));
+            sgOptions.add(deferredNote);
+            sgOptions.setVisible(false);
+            add(sgOptions);
+
+            sgBtn.addChangeListener(e -> sgOptions.setVisible(sgBtn.isSelected()));
         }
 
         @Override
@@ -588,18 +618,23 @@ public class TlcDigitizerFrame extends JFrame {
         @Override
         boolean commit() {
             state.usedPolynomialBackground = polynomialBtn.isSelected();
+            state.sgDegree = (Integer) sgDegreeSp.getValue();
             FloatProcessor src = (state.perspCorrected != null) ? state.perspCorrected : state.corrected;
             if (state.usedPolynomialBackground) {
                 IJ.showStatus("Fitting quartic background polynomial…");
                 state.corrected = BackgroundCorrection.fitAndSubtract(src);
                 IJ.showStatus("");
+                setDisplay(state.corrected.duplicate(),
+                    "TLC Digitizer — Step 3 · Background corrected");
             } else {
-                state.corrected = src; // Savitzky-Golay deferred to post-integration in step 5
-                IJ.log("[Step 3] Savitzky-Golay selected — per-spot correction deferred to step 5.");
+                state.corrected = src;
+                setDisplay(state.corrected.duplicate(),
+                    "TLC Digitizer — Step 3 · Background (SG deferred to Step 5)");
             }
-            setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 3 · Background corrected");
             IJ.log("[Step 3] Background method: "
-                + (state.usedPolynomialBackground ? "quartic polynomial" : "Savitzky-Golay"));
+                + (state.usedPolynomialBackground
+                    ? "quartic polynomial"
+                    : "Savitzky-Golay (degree " + state.sgDegree + ")"));
             return true;
         }
     }
@@ -759,6 +794,8 @@ public class TlcDigitizerFrame extends JFrame {
         private final List<List<Spot>> spotHistory = new ArrayList<List<Spot>>();
         private Overlay overlay;
         private MouseAdapter canvasListener;
+        /** Pre-flattened image used for detection when Savitzky-Golay is selected. */
+        private FloatProcessor flattenedForDetection;
 
         Step5Panel() {
             setLayout(new BorderLayout(0, 8));
@@ -827,6 +864,18 @@ public class TlcDigitizerFrame extends JFrame {
             overlay = new Overlay();
             displayWindow.setOverlay(overlay);
 
+            // When Savitzky-Golay is selected the image reaching Step 5 has no global background
+            // correction. Spot detection on an uneven-background image degrades quality, so we
+            // pre-flatten a detection-only copy here using the quartic polynomial. Integration
+            // still uses the raw state.corrected; only detection uses the flattened copy.
+            if (!state.usedPolynomialBackground) {
+                IJ.showStatus("Pre-flattening for spot detection…");
+                flattenedForDetection = BackgroundCorrection.fitAndSubtract(state.corrected);
+                IJ.showStatus("");
+            } else {
+                flattenedForDetection = null;
+            }
+
             IJ.wait(120);  // let ImageJ finish binding the canvas
             ImageCanvas canvas = displayWindow.getCanvas();
             if (canvas != null) {
@@ -868,12 +917,14 @@ public class TlcDigitizerFrame extends JFrame {
         }
 
         private FloatProcessor source() {
+            FloatProcessor base = (flattenedForDetection != null)
+                    ? flattenedForDetection : state.corrected;
             if (invertBox.isSelected()) {
-                FloatProcessor fp = (FloatProcessor) state.corrected.duplicate();
+                FloatProcessor fp = (FloatProcessor) base.duplicate();
                 fp.invert();
                 return fp;
             }
-            return state.corrected;
+            return base;
         }
 
         private void detect() {
@@ -937,7 +988,7 @@ public class TlcDigitizerFrame extends JFrame {
             if (!state.usedPolynomialBackground) {
                 IJ.showStatus("Applying per-spot polynomial background…");
                 BackgroundCorrection.applyPerSpotPolynomial(
-                    state.spots, state.corrected, BackgroundCorrection.DEFAULT_SG_DEGREE);
+                    state.spots, state.corrected, state.sgDegree);
                 IJ.showStatus("");
             }
 

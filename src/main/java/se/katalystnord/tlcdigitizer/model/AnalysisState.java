@@ -58,6 +58,9 @@ public class AnalysisState {
     /** Whether background correction used the polynomial (A) or Savitzky-Golay (B) method. */
     public boolean usedPolynomialBackground = true;
 
+    /** Polynomial degree for per-spot Savitzky-Golay correction (1–8). */
+    public int sgDegree = 5;
+
     /** Threshold multiplier used for spot detection (default: 1.0 = mean). */
     public double thresholdFactor = 1.0;
 }
