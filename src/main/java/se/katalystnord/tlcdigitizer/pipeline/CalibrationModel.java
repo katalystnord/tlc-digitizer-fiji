@@ -11,14 +11,15 @@ import java.util.List;
  * Stage 7: Calibration and quantification.
  *
  * Three model types are supported:
- *   LINEAR   — concentration = slope × signal + intercept
- *              Best for narrow concentration ranges. LOD/LOQ per ICH Q2(R1).
- *   LOG_LOG  — concentration = exp(b) × signal^a  (linear in log-log space)
- *              Best for wide dynamic ranges (e.g. 10–10 000 µg/mL).
+ *   LINEAR    — concentration = slope × signal + intercept
+ *               Best for narrow concentration ranges.
+ *   LOG_LOG   — concentration = exp(b) × signal^a  (linear in log-log space)
+ *               Best for wide dynamic ranges (e.g. 10–10 000 µg/mL).
  *   QUADRATIC — concentration = a2·signal² + a1·signal + a0
- *              Handles mild curve-bending at high concentrations.
+ *               Handles mild curve-bending at high concentrations.
  *
- * LOD/LOQ are only defined for LINEAR (ICH Q2(R1): 3.3σ/slope and 10σ/slope).
+ * LOD/LOQ are computed for LINEAR only. Three conventions are selectable
+ * (see {@link LodLoqConvention}); the default is ICH Q2(R1) regression.
  * RMSE in concentration units is reported for all models.
  *
  * Reference standards must be on the same plate as unknowns (per qTLC paper).
@@ -26,7 +27,7 @@ import java.util.List;
 public final class CalibrationModel {
 
     // -----------------------------------------------------------------------
-    // Model type
+    // Enums
     // -----------------------------------------------------------------------
 
     public enum ModelType {
@@ -44,6 +45,30 @@ public final class CalibrationModel {
         public final String description;
 
         ModelType(String label, String description) {
+            this.label = label;
+            this.description = description;
+        }
+    }
+
+    /**
+     * Convention used to compute LOD and LOQ. Only meaningful for LINEAR models;
+     * LOD/LOQ are NaN for LOG_LOG and QUADRATIC regardless of convention.
+     */
+    public enum LodLoqConvention {
+        REGRESSION_ICH(
+            "Regression (ICH Q2(R1))",
+            "σ from calibration line residuals — standard pharma method (3.3σ/S, 10σ/S)"),
+        SIGNAL_NOISE(
+            "Signal / noise  (S/N = 3, 10)",
+            "σ from image background pixels — suitable when blank lane areas are present"),
+        MANUAL(
+            "Manual entry",
+            "Enter LOD and LOQ values directly, e.g. from a separate dilution experiment");
+
+        public final String label;
+        public final String description;
+
+        LodLoqConvention(String label, String description) {
             this.label = label;
             this.description = description;
         }
@@ -79,20 +104,33 @@ public final class CalibrationModel {
 
     public final int nPoints;
 
+    /**
+     * Residual standard error from the LINEAR regression (σ in ICH formula).
+     * NaN for non-LINEAR models. Stored so LOD/LOQ can be recomputed later
+     * when the user switches the LOD/LOQ convention in the UI.
+     */
+    public final double sigmaRegression;
+
+    /** Convention used to derive {@link #lod} and {@link #loq}. */
+    public final LodLoqConvention lodLoqConvention;
+
     // -----------------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------------
 
     private CalibrationModel(ModelType modelType, double[] coefficients,
                               double rSquared, double lod, double loq,
-                              double rmse, int nPoints) {
-        this.modelType    = modelType;
-        this.coefficients = coefficients;
-        this.rSquared     = rSquared;
-        this.lod          = lod;
-        this.loq          = loq;
-        this.rmse         = rmse;
-        this.nPoints      = nPoints;
+                              double rmse, int nPoints,
+                              double sigmaRegression, LodLoqConvention lodLoqConvention) {
+        this.modelType        = modelType;
+        this.coefficients     = coefficients;
+        this.rSquared         = rSquared;
+        this.lod              = lod;
+        this.loq              = loq;
+        this.rmse             = rmse;
+        this.nPoints          = nPoints;
+        this.sigmaRegression  = sigmaRegression;
+        this.lodLoqConvention = lodLoqConvention;
         // Convenience fields
         this.slope     = (modelType == ModelType.LINEAR) ? coefficients[1] : Double.NaN;
         this.intercept = (modelType == ModelType.LINEAR) ? coefficients[0] : Double.NaN;
@@ -159,6 +197,91 @@ public final class CalibrationModel {
         }
     }
 
+    /**
+     * Returns a new CalibrationModel identical to this one but with LOD/LOQ
+     * recomputed using the specified convention. For non-LINEAR models returns
+     * {@code this} unchanged (LOD/LOQ are not defined for LOG_LOG/QUADRATIC).
+     *
+     * @param convention  which LOD/LOQ method to apply
+     * @param bgSigma     background image sigma (used by SIGNAL_NOISE; ignored otherwise)
+     * @param manualLod   user-supplied LOD in concentration units (used by MANUAL only)
+     * @param manualLoq   user-supplied LOQ in concentration units (used by MANUAL only)
+     */
+    public CalibrationModel withLodLoqConvention(
+            LodLoqConvention convention, double bgSigma,
+            double manualLod, double manualLoq) {
+        if (modelType != ModelType.LINEAR) return this;
+        double newLod, newLoq;
+        switch (convention) {
+            case REGRESSION_ICH:
+                newLod = (slope != 0) ? 3.3  * sigmaRegression / Math.abs(slope) : Double.NaN;
+                newLoq = (slope != 0) ? 10.0 * sigmaRegression / Math.abs(slope) : Double.NaN;
+                break;
+            case SIGNAL_NOISE:
+                if (Double.isNaN(bgSigma) || slope == 0) {
+                    newLod = Double.NaN;
+                    newLoq = Double.NaN;
+                } else {
+                    newLod = 3.0  * bgSigma / Math.abs(slope);
+                    newLoq = 10.0 * bgSigma / Math.abs(slope);
+                }
+                break;
+            case MANUAL:
+                newLod = manualLod;
+                newLoq = manualLoq;
+                break;
+            default: return this;
+        }
+        return new CalibrationModel(modelType, coefficients, rSquared,
+                                    newLod, newLoq, rmse, nPoints,
+                                    sigmaRegression, convention);
+    }
+
+    /**
+     * Estimates background noise σ from the corrected image by computing the
+     * standard deviation of pixels that lie outside all spot circles.
+     * Returns {@link Double#NaN} if fewer than 100 background pixels are found.
+     *
+     * @param fp    background-corrected FloatProcessor
+     * @param spots detected spots (centroids + radii in image pixels)
+     */
+    public static double estimateBackgroundSigma(ij.process.FloatProcessor fp, List<Spot> spots) {
+        int w = fp.getWidth(), h = fp.getHeight();
+        float[] pixels = (float[]) fp.getPixels();
+
+        // Build spot list as arrays for fast inner-loop access
+        int n = spots.size();
+        float[] cx = new float[n], cy = new float[n], r2 = new float[n];
+        for (int i = 0; i < n; i++) {
+            Spot s = spots.get(i);
+            cx[i] = s.centroidX;
+            cy[i] = s.centroidY;
+            float margin = s.radius * 1.5f;   // exclude a halo around each spot
+            r2[i] = margin * margin;
+        }
+
+        double sum = 0, sumSq = 0;
+        long count = 0;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                boolean inSpot = false;
+                for (int i = 0; i < n && !inSpot; i++) {
+                    float dx = x - cx[i], dy = y - cy[i];
+                    if (dx * dx + dy * dy <= r2[i]) inSpot = true;
+                }
+                if (!inSpot) {
+                    double v = pixels[y * w + x];
+                    sum   += v;
+                    sumSq += v * v;
+                    count++;
+                }
+            }
+        }
+        if (count < 100) return Double.NaN;
+        double mean = sum / count;
+        return Math.sqrt(sumSq / count - mean * mean);
+    }
+
     /** Populates {@code assignedConcentration} for all spots with a valid integration value. */
     public void applyTo(List<Spot> spots) {
         for (Spot s : spots) {
@@ -172,8 +295,9 @@ public final class CalibrationModel {
         switch (modelType) {
             case LINEAR:
                 return String.format(
-                    "LINEAR n=%d slope=%.6g intercept=%.6g R²=%.4f LOD=%.4g LOQ=%.4g RMSE=%.4g",
-                    nPoints, coefficients[1], coefficients[0], rSquared, lod, loq, rmse);
+                    "LINEAR n=%d slope=%.6g intercept=%.6g R²=%.4f LOD=%.4g LOQ=%.4g RMSE=%.4g [%s]",
+                    nPoints, coefficients[1], coefficients[0], rSquared, lod, loq, rmse,
+                    lodLoqConvention.label);
             case LOG_LOG:
                 return String.format(
                     "LOG_LOG n=%d exponent=%.6g prefactor=%.6g R²=%.4f RMSE=%.4g",
@@ -206,7 +330,8 @@ public final class CalibrationModel {
         double loq       = (slope != 0) ? 10.0 * sigma / Math.abs(slope) : Double.NaN;
         double rmse      = computeRmse(refs, intercept, slope, 2, ModelType.LINEAR);
         return new CalibrationModel(ModelType.LINEAR, new double[]{intercept, slope},
-                                    r2, lod, loq, rmse, (int) reg.getN());
+                                    r2, lod, loq, rmse, (int) reg.getN(),
+                                    sigma, LodLoqConvention.REGRESSION_ICH);
     }
 
     private static CalibrationModel fitLogLog(List<Spot> refs) {
@@ -237,7 +362,8 @@ public final class CalibrationModel {
         double rmse = (count >= 3) ? Math.sqrt(sumSqRes / (count - 2)) : 0;
 
         return new CalibrationModel(ModelType.LOG_LOG, new double[]{interceptLog, slopeLog},
-                                    r2, Double.NaN, Double.NaN, rmse, n);
+                                    r2, Double.NaN, Double.NaN, rmse, n,
+                                    Double.NaN, LodLoqConvention.REGRESSION_ICH);
     }
 
     private static CalibrationModel fitQuadratic(List<Spot> refs) {
@@ -269,7 +395,8 @@ public final class CalibrationModel {
         double rmse = (n >= 4) ? Math.sqrt(ssRes / (n - 3)) : 0;
 
         return new CalibrationModel(ModelType.QUADRATIC, c,
-                                    r2, Double.NaN, Double.NaN, rmse, n);
+                                    r2, Double.NaN, Double.NaN, rmse, n,
+                                    Double.NaN, LodLoqConvention.REGRESSION_ICH);
     }
 
     private static double computeRmse(List<Spot> refs,

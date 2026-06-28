@@ -1,5 +1,6 @@
 package se.katalystnord.tlcdigitizer.pipeline;
 
+import ij.process.FloatProcessor;
 import org.junit.Test;
 import se.katalystnord.tlcdigitizer.model.Spot;
 
@@ -127,6 +128,86 @@ public class CalibrationModelTest {
         assertTrue("LOD should be positive or zero", model.lod >= 0);
         assertTrue("LOQ should be positive or zero", model.loq >= 0);
         assertTrue("LOQ should be >= LOD", model.loq >= model.lod);
+    }
+
+    @Test
+    public void withLodLoqConvention_signalNoise_scaledByBgSigma() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 500,  5));
+        refs.add(makeRef(1, 1000, 10));
+        refs.add(makeRef(2, 1500, 15));
+        refs.add(makeRef(3, 2000, 20));
+        CalibrationModel m = CalibrationModel.fit(refs);
+
+        // slope ≈ 0.01 (10µg/mL per 1000 units), bgSigma = 50
+        double bgSigma = 50.0;
+        CalibrationModel sn = m.withLodLoqConvention(
+                CalibrationModel.LodLoqConvention.SIGNAL_NOISE, bgSigma, 0, 0);
+
+        assertEquals(CalibrationModel.LodLoqConvention.SIGNAL_NOISE, sn.lodLoqConvention);
+        // LOD = 3 * sigma / |slope|; LOQ = 10 * sigma / |slope|
+        assertEquals("LOD from S/N", 3.0 * bgSigma / Math.abs(m.slope), sn.lod, 0.01);
+        assertEquals("LOQ from S/N", 10.0 * bgSigma / Math.abs(m.slope), sn.loq, 0.01);
+        assertTrue("LOQ >= LOD", sn.loq >= sn.lod);
+    }
+
+    @Test
+    public void withLodLoqConvention_manual_storesExactValues() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 500,  5));
+        refs.add(makeRef(1, 1000, 10));
+        refs.add(makeRef(2, 1500, 15));
+        CalibrationModel m = CalibrationModel.fit(refs);
+
+        CalibrationModel manual = m.withLodLoqConvention(
+                CalibrationModel.LodLoqConvention.MANUAL, 0, 1.23, 4.56);
+        assertEquals(1.23, manual.lod, 1e-9);
+        assertEquals(4.56, manual.loq, 1e-9);
+        assertEquals(CalibrationModel.LodLoqConvention.MANUAL, manual.lodLoqConvention);
+    }
+
+    @Test
+    public void withLodLoqConvention_nonLinearModel_returnsUnchanged() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(0, 100,  100));
+        refs.add(makeRef(1, 200,  400));
+        refs.add(makeRef(2, 400, 1600));
+        CalibrationModel ll = CalibrationModel.fit(refs, CalibrationModel.ModelType.LOG_LOG);
+        CalibrationModel same = ll.withLodLoqConvention(
+                CalibrationModel.LodLoqConvention.MANUAL, 0, 0.1, 0.3);
+        assertSame("Non-linear model should be returned unchanged", ll, same);
+    }
+
+    @Test
+    public void estimateBackgroundSigma_uniformBackground_nearZeroSigma() {
+        // 100×100 image, all pixels = 1.0f (uniform background, no spots)
+        FloatProcessor fp = new FloatProcessor(100, 100);
+        float[] px = (float[]) fp.getPixels();
+        java.util.Arrays.fill(px, 1.0f);
+        List<Spot> noSpots = new ArrayList<>();
+
+        double sigma = CalibrationModel.estimateBackgroundSigma(fp, noSpots);
+        assertEquals("Uniform background should give σ ≈ 0", 0.0, sigma, 1e-6);
+    }
+
+    @Test
+    public void estimateBackgroundSigma_spotsExcluded_measuresBgOnly() {
+        // 200×200 image: background = 1.0, bright spot in center at (100,100) r=20
+        int w = 200, h = 200;
+        FloatProcessor fp = new FloatProcessor(w, h);
+        float[] px = (float[]) fp.getPixels();
+        java.util.Arrays.fill(px, 1.0f);
+        // bright spot
+        for (int y = 80; y < 120; y++)
+            for (int x = 80; x < 120; x++)
+                px[y * w + x] = 10.0f;
+
+        List<Spot> spots = new ArrayList<>();
+        spots.add(new Spot(1, 100, 100, 20, h));
+
+        double sigma = CalibrationModel.estimateBackgroundSigma(fp, spots);
+        // background pixels are all 1.0 (halo 1.5× radius = 30 excluded) → σ ≈ 0
+        assertEquals("Background sigma should be ~0 with uniform background", 0.0, sigma, 0.01);
     }
 
     @Test

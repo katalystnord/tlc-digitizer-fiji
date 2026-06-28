@@ -1051,6 +1051,18 @@ public class TlcDigitizerFrame extends JFrame {
                 new JRadioButton[CalibrationModel.ModelType.values().length];
         private JLabel modelDesc;
 
+        // LOD/LOQ convention selector
+        private final ButtonGroup lodLoqGroup = new ButtonGroup();
+        private final JRadioButton[] lodLoqButtons =
+                new JRadioButton[CalibrationModel.LodLoqConvention.values().length];
+        private JLabel lodLoqDesc;
+        private JPanel lodLoqSection;       // entire LOD/LOQ block (hidden for non-LINEAR)
+        private JLabel snSigmaLabel;        // shown for SIGNAL_NOISE
+        private JPanel manualLodLoqPanel;   // shown for MANUAL
+        private JSpinner manualLodSpinner;
+        private JSpinner manualLoqSpinner;
+        private double cachedBgSigma = Double.NaN;
+
         Step6Panel() {
             setLayout(new BorderLayout(0, 8));
 
@@ -1061,6 +1073,7 @@ public class TlcDigitizerFrame extends JFrame {
                 "and enter its known concentration. At least 3 reference spots are required " +
                 "(ICH&nbsp;Q2(R1))."));
 
+            // Calibration model
             JPanel modelPanel = new JPanel(new BorderLayout(0, 2));
             modelPanel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
@@ -1071,7 +1084,12 @@ public class TlcDigitizerFrame extends JFrame {
                 modelButtons[i] = new JRadioButton(types[i].label);
                 modelButtons[i].setFont(modelButtons[i].getFont().deriveFont(12f));
                 final CalibrationModel.ModelType t = types[i];
-                modelButtons[i].addActionListener(e -> modelDesc.setText(t.description));
+                modelButtons[i].addActionListener(e -> {
+                    modelDesc.setText(t.description);
+                    lodLoqSection.setVisible(t == CalibrationModel.ModelType.LINEAR);
+                    north.revalidate();
+                    north.repaint();
+                });
                 modelGroup.add(modelButtons[i]);
                 radios.add(modelButtons[i]);
             }
@@ -1082,6 +1100,67 @@ public class TlcDigitizerFrame extends JFrame {
             modelPanel.add(radios, BorderLayout.CENTER);
             modelPanel.add(modelDesc, BorderLayout.SOUTH);
             north.add(modelPanel);
+
+            // LOD/LOQ convention (visible only for LINEAR)
+            lodLoqSection = new JPanel();
+            lodLoqSection.setLayout(new BoxLayout(lodLoqSection, BoxLayout.Y_AXIS));
+            lodLoqSection.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(4, 0, 8, 0)));
+
+            JLabel lodLoqTitle = new JLabel("LOD / LOQ convention:");
+            lodLoqTitle.setFont(lodLoqTitle.getFont().deriveFont(Font.BOLD, 12f));
+            JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            titleRow.add(lodLoqTitle);
+            lodLoqSection.add(titleRow);
+
+            JPanel lodLoqRadios = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            CalibrationModel.LodLoqConvention[] convs = CalibrationModel.LodLoqConvention.values();
+            for (int i = 0; i < convs.length; i++) {
+                lodLoqButtons[i] = new JRadioButton(convs[i].label);
+                lodLoqButtons[i].setFont(lodLoqButtons[i].getFont().deriveFont(12f));
+                final CalibrationModel.LodLoqConvention c = convs[i];
+                lodLoqButtons[i].addActionListener(e -> updateLodLoqConditionalPanel(c));
+                lodLoqGroup.add(lodLoqButtons[i]);
+                lodLoqRadios.add(lodLoqButtons[i]);
+            }
+            lodLoqButtons[0].setSelected(true);  // REGRESSION_ICH default
+            lodLoqSection.add(lodLoqRadios);
+
+            lodLoqDesc = new JLabel(convs[0].description);
+            lodLoqDesc.setFont(lodLoqDesc.getFont().deriveFont(Font.ITALIC, 11f));
+            lodLoqDesc.setForeground(Color.DARK_GRAY);
+            JPanel descRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            descRow.add(lodLoqDesc);
+            lodLoqSection.add(descRow);
+
+            // S/N sigma label (shown when SIGNAL_NOISE is selected)
+            snSigmaLabel = new JLabel("σ_bg = computing…");
+            snSigmaLabel.setFont(snSigmaLabel.getFont().deriveFont(12f));
+            JPanel snRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            snRow.add(snSigmaLabel);
+            snRow.setVisible(false);
+            lodLoqSection.add(snRow);
+
+            // Manual LOD / LOQ spinners (shown when MANUAL is selected)
+            manualLodSpinner = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 1e9, 0.001));
+            manualLodSpinner.setEditor(new JSpinner.NumberEditor(manualLodSpinner, "0.000"));
+            ((JSpinner.NumberEditor) manualLodSpinner.getEditor()).getTextField().setColumns(8);
+            manualLoqSpinner = new JSpinner(new SpinnerNumberModel(0.0, 0.0, 1e9, 0.001));
+            manualLoqSpinner.setEditor(new JSpinner.NumberEditor(manualLoqSpinner, "0.000"));
+            ((JSpinner.NumberEditor) manualLoqSpinner.getEditor()).getTextField().setColumns(8);
+            manualLodLoqPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+            manualLodLoqPanel.add(new JLabel("LOD:"));
+            manualLodLoqPanel.add(manualLodSpinner);
+            manualLodLoqPanel.add(new JLabel("LOQ:"));
+            manualLodLoqPanel.add(manualLoqSpinner);
+            manualLodLoqPanel.setVisible(false);
+            lodLoqSection.add(manualLodLoqPanel);
+
+            // Store references to the conditional rows (snRow, manualLodLoqPanel) so
+            // updateLodLoqConditionalPanel can show/hide them
+            north.add(lodLoqSection);
+
             add(north, BorderLayout.NORTH);
 
             rows = new JPanel(new GridLayout(0, 4, 6, 3));
@@ -1124,15 +1203,47 @@ public class TlcDigitizerFrame extends JFrame {
             rows.repaint();
             scroll.revalidate();
 
+            // Pre-compute background sigma for the S/N convention
+            if (state.corrected != null) {
+                cachedBgSigma = CalibrationModel.estimateBackgroundSigma(
+                        state.corrected, state.spots);
+                snSigmaLabel.setText(Double.isNaN(cachedBgSigma)
+                    ? "σ_bg = unavailable (too few background pixels)"
+                    : String.format("σ_bg = %.4g  (background pixel SD)", cachedBgSigma));
+            }
+
             setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 6 · Calibrate");
             Overlay ov = new Overlay();
             displayWindow.setOverlay(ov);
             updateSpotOverlay(ov, displayWindow, state.spots);
         }
 
+        private void updateLodLoqConditionalPanel(CalibrationModel.LodLoqConvention conv) {
+            lodLoqDesc.setText(conv.description);
+            // Find the snRow and manualLodLoqPanel by their position in lodLoqSection
+            Component[] comps = lodLoqSection.getComponents();
+            for (Component c : comps) {
+                if (c == manualLodLoqPanel) c.setVisible(conv == CalibrationModel.LodLoqConvention.MANUAL);
+            }
+            // snSigmaLabel is inside a JPanel (snRow) — update that panel's visibility
+            if (snSigmaLabel.getParent() != null) {
+                snSigmaLabel.getParent().setVisible(conv == CalibrationModel.LodLoqConvention.SIGNAL_NOISE);
+            }
+            lodLoqSection.revalidate();
+            lodLoqSection.repaint();
+        }
+
         private JLabel bold(String text) {
             JLabel lbl = new JLabel("<html><b>" + text + "</b></html>");
             return lbl;
+        }
+
+        private CalibrationModel.LodLoqConvention selectedConvention() {
+            CalibrationModel.LodLoqConvention[] convs = CalibrationModel.LodLoqConvention.values();
+            for (int i = 0; i < lodLoqButtons.length; i++) {
+                if (lodLoqButtons[i].isSelected()) return convs[i];
+            }
+            return CalibrationModel.LodLoqConvention.REGRESSION_ICH;
         }
 
         @Override
@@ -1174,6 +1285,16 @@ public class TlcDigitizerFrame extends JFrame {
             }
             try {
                 state.calibrationModel = CalibrationModel.fit(refs, modelType);
+
+                // Apply LOD/LOQ convention (only meaningful for LINEAR)
+                if (modelType == CalibrationModel.ModelType.LINEAR) {
+                    CalibrationModel.LodLoqConvention conv = selectedConvention();
+                    double manualLod = ((Number) manualLodSpinner.getValue()).doubleValue();
+                    double manualLoq = ((Number) manualLoqSpinner.getValue()).doubleValue();
+                    state.calibrationModel = state.calibrationModel.withLodLoqConvention(
+                            conv, cachedBgSigma, manualLod, manualLoq);
+                }
+
                 state.calibrationModel.applyTo(state.spots);
                 IJ.log("[Step 6] " + state.calibrationModel.toSummary());
             } catch (IllegalArgumentException e) {

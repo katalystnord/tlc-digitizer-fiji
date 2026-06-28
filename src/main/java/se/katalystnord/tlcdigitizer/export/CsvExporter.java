@@ -80,7 +80,7 @@ public final class CsvExporter {
                     pw.println("# intercept: " + cal.intercept);
                     pw.println("# LOD: " + cal.lod);
                     pw.println("# LOQ: " + cal.loq);
-                    pw.println("# LOD_LOQ_method: ICH_Q2R1_regression (3.3sigma/slope, 10sigma/slope)");
+                    pw.println("# LOD_LOQ_convention: " + cal.lodLoqConvention.name());
                     break;
                 case LOG_LOG:
                     pw.println("# exponent: " + cal.coefficients[1]);
