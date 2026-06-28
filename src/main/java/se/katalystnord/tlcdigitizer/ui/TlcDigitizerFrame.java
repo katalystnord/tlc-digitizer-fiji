@@ -351,7 +351,7 @@ public class TlcDigitizerFrame extends JFrame {
         // --- Layout helpers ---
 
         JPanel instrPanel(String html) {
-            JLabel lbl = new JLabel("<html>" + html + "</html>");
+            JLabel lbl = new JLabel("<html><body style='width:480px'>" + html + "</body></html>");
             lbl.setFont(lbl.getFont().deriveFont(12f));
             JPanel p = new JPanel(new BorderLayout());
             p.setBorder(BorderFactory.createCompoundBorder(
@@ -817,10 +817,12 @@ public class TlcDigitizerFrame extends JFrame {
             setLayout(new BorderLayout(0, 8));
 
             add(instrPanel("<b>Drag the slider</b> to auto-detect spots (numbered yellow circles).<br>" +
-                "<b>Left-click</b> the image to add a missed spot; " +
-                "<b>right-click</b> to remove a false positive.<br>" +
-                "Ctrl+Z undoes the last manual add/remove. " +
-                "Moving the slider resets manual edits."), BorderLayout.NORTH);
+                "<b>To add a missed spot:</b> left-click the centre of the spot on the image. " +
+                "A circle sized to the local bright region will appear automatically.<br>" +
+                "<b>To remove a false positive:</b> right-click anywhere inside its circle.<br>" +
+                "<b>Ctrl+Z</b> undoes the last manual add or remove.<br>" +
+                "<i>Tip: moving the slider resets all manual edits — " +
+                "finish slider tuning before making manual corrections.</i>"), BorderLayout.NORTH);
 
             // Slider 10–500 → multiplier 0.10–5.00
             slider = new JSlider(10, 500, 100);
@@ -1127,10 +1129,10 @@ public class TlcDigitizerFrame extends JFrame {
         Step7Panel() {
             setLayout(new BorderLayout(0, 12));
             add(instrPanel("Saves three files from a single base path:<br>" +
-                "<b>.csv</b> — numerical results + analysis parameters &nbsp;|&nbsp; " +
-                "<b>.png</b> — annotated plate image for spot identification &nbsp;|&nbsp; " +
-                "<b>.tif</b> — same image with the full CSV embedded in the metadata " +
-                "(open in Fiji › Image › Show Info… to retrieve). " +
+                "<b>.csv</b> — numerical results + analysis parameters<br>" +
+                "<b>.png</b> — annotated plate image for spot identification<br>" +
+                "<b>.tif</b> — same image with full CSV embedded in metadata " +
+                "(Fiji › Image › Show Info… to retrieve)<br>" +
                 "Spot IDs run left-to-right by lane, top-to-bottom within each lane."),
                 BorderLayout.NORTH);
 

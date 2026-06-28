@@ -25,11 +25,18 @@ public final class SpotDetector {
     /** Aspect ratio must be in [1 - tolerance, 1 + tolerance]. Matches TLCyzer. */
     static final float ASPECT_RATIO_TOLERANCE = 0.75f;
 
-    /** Minimum spot dimension as fraction of max(width, height). Matches TLCyzer. */
-    static final float SIZE_MIN_FRACTION = 0.02f;
+    /** Minimum spot dimension as fraction of max(width, height). */
+    static final float SIZE_MIN_FRACTION = 0.025f;
 
     /** Maximum spot dimension as fraction of max(width, height). Matches TLCyzer. */
     static final float SIZE_MAX_FRACTION = 0.25f;
+
+    /**
+     * Components whose bounding box reaches within this fraction of any image edge are
+     * rejected as border artefacts (vignette corners, plate-edge reflections, etc.).
+     * 1 % of min(width, height) ≈ 15 px on a 1500 px image.
+     */
+    static final float EDGE_MARGIN_FRACTION = 0.01f;
 
     private SpotDetector() {}
 
@@ -75,6 +82,7 @@ public final class SpotDetector {
 
         float sizeMin = maxDim * SIZE_MIN_FRACTION;
         float sizeMax = maxDim * SIZE_MAX_FRACTION;
+        int edgeMargin = Math.max(2, (int)(Math.min(width, height) * EDGE_MARGIN_FRACTION));
 
         for (Map.Entry<Integer, int[]> entry : boundingBoxes.entrySet()) {
             int label = entry.getKey();
@@ -92,6 +100,15 @@ public final class SpotDetector {
 
             // Size filter
             if (bboxW < sizeMin || bboxW > sizeMax || bboxH < sizeMin || bboxH > sizeMax) {
+                continue;
+            }
+
+            // Edge artefact filter: reject components whose bounding box reaches the image border.
+            // Corner vignettes, plate-edge reflections, and printing artefacts all touch the edge;
+            // real TLC spots are always fully inside the plate area.
+            if (bbox[0] <= edgeMargin || bbox[1] <= edgeMargin
+                    || bbox[2] >= width  - edgeMargin
+                    || bbox[3] >= height - edgeMargin) {
                 continue;
             }
 
