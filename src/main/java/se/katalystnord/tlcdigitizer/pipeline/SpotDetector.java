@@ -112,8 +112,11 @@ public final class SpotDetector {
             float cx = (float) (sumX / sumV);
             float cy = (float) (sumY / sumV);
 
-            // Radius = min distance from centroid to bbox corners
-            float r = minCornerDistance(cx, cy, bbox[0], bbox[1], bbox[2], bbox[3]);
+            // Radius = average half-dimension (TLCyzer formula: (W + H) / 4).
+            // This matches the physical spot for circular spots and averages the
+            // two axes for ovals — unlike the half-diagonal formula previously
+            // used, which overestimated by ~41% for round spots.
+            float r = (bboxW + bboxH) / 4f;
 
             spots.add(new Spot(spotId++, cx, cy, r, height));
         }
@@ -193,7 +196,7 @@ public final class SpotDetector {
         if (sumV == 0) return new Spot(-1, clickX, clickY, defaultR, imageHeight);
 
         float cx = (float)(sumX / sumV), cy = (float)(sumY / sumV);
-        float r = Math.max(defaultR, minCornerDistance(cx, cy, minBX, minBY, maxBX, maxBY));
+        float r = Math.max(defaultR, (float)(maxBX - minBX + maxBY - minBY) / 4f);
         return new Spot(-1, cx, cy, r, imageHeight);
     }
 
@@ -340,17 +343,4 @@ public final class SpotDetector {
         return boxes;
     }
 
-    private static float minCornerDistance(float cx, float cy, int left, int top, int right, int bottom) {
-        float tl = dist(cx, cy, left, top);
-        float tr = dist(cx, cy, right, top);
-        float br = dist(cx, cy, right, bottom);
-        float bl = dist(cx, cy, left, bottom);
-        return Math.min(Math.min(tl, tr), Math.min(br, bl));
-    }
-
-    private static float dist(float cx, float cy, int x, int y) {
-        float dx = cx - x;
-        float dy = cy - y;
-        return (float) Math.sqrt(dx * dx + dy * dy);
-    }
 }

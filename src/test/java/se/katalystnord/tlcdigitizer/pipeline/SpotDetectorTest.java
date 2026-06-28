@@ -96,6 +96,18 @@ public class SpotDetectorTest {
     }
 
     @Test
+    public void detect_syntheticSpot_radiusMatchesInput() {
+        // A circular spot of radius 20 should yield radius ≈ 20 with the TLCyzer
+        // (W+H)/4 formula.  Previous minCornerDistance formula gave ~28 (41% too large).
+        float inputRadius = 20f;
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, inputRadius, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp);
+        assertEquals(1, spots.size());
+        assertEquals("Radius should approximate input radius",
+                     inputRadius, spots.get(0).radius, 3.0f);
+    }
+
+    @Test
     public void detect_multiplierOverload_matchesDefaultAtOne() {
         // detect(fp, 1.0f) must produce the same spots as detect(fp)
         FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
