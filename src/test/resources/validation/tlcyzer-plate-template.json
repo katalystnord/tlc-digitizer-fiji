@@ -1,0 +1,67 @@
+{
+  "_comment": "Fixture template for TLCyzer validation dataset (Hauk et al., Sci. Rep. 12, 13433, 2022).",
+  "_comment2": "Replace all placeholder values with coordinates read from TLC Digitizer's wizard.",
+  "_comment3": "Copy to your validation.data.dir alongside the plate image, then remove _comment fields.",
+
+  "imagePath": "plate-1.jpg",
+  "description": "TLCyzer plate 1 — paracetamol/ibuprofen FDC",
+
+  "invertImage": false,
+  "useGreenChannel": false,
+  "usePolynomialBackground": true,
+  "sgDegree": 5,
+  "thresholdFactor": 1.0,
+
+  "corners": [42, 38, 891, 41, 887, 1203, 44, 1199],
+
+  "originYFraction": 0.925,
+  "frontYFraction": 0.055,
+
+  "referenceSpots": [
+    {
+      "_comment": "Paracetamol lane 1, 50 µg/spot",
+      "xFraction": 0.12, "yFraction": 0.60,
+      "knownConcentration": 50.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 2, 100 µg/spot (replicate)",
+      "xFraction": 0.22, "yFraction": 0.60,
+      "knownConcentration": 100.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 3, 150 µg/spot",
+      "xFraction": 0.32, "yFraction": 0.60,
+      "knownConcentration": 150.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 4, 50 µg/spot (replicate)",
+      "xFraction": 0.42, "yFraction": 0.60,
+      "knownConcentration": 50.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 5, 100 µg/spot (replicate)",
+      "xFraction": 0.52, "yFraction": 0.60,
+      "knownConcentration": 100.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 6, 150 µg/spot (replicate)",
+      "xFraction": 0.62, "yFraction": 0.60,
+      "knownConcentration": 150.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 7, 50 µg/spot (replicate)",
+      "xFraction": 0.72, "yFraction": 0.60,
+      "knownConcentration": 50.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 8, 100 µg/spot (replicate)",
+      "xFraction": 0.82, "yFraction": 0.60,
+      "knownConcentration": 100.0, "apiName": "paracetamol"
+    },
+    {
+      "_comment": "Paracetamol lane 9, 150 µg/spot (replicate)",
+      "xFraction": 0.92, "yFraction": 0.60,
+      "knownConcentration": 150.0, "apiName": "paracetamol"
+    }
+  ]
+}

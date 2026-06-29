@@ -1,0 +1,67 @@
+{
+  "_notes": [
+    "API: Sulfamethoxazole (SMX), from cotrimoxazole plate, diluted 1:6.",
+    "Label visible: 'Wt? RC 21.4'. Identified as cotrimoxazole by agent analysis of supplement PDF.",
+    "SMX 100% standard: 5 mg/mL / 6 (dilution) × 2 µL spotting = 1.667 µg/spot.",
+    "TMP 100% standard: 1 mg/mL / 6 × 2 µL = 0.333 µg/spot (second compound, may also be visible).",
+    "Only the 5 clearly visible spots (one compound column) are encoded here.",
+    "If a second column of spots (TMP, at different Rf) is visible after detection, add them.",
+    "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
+    "Rf ≈ 0.52 (spots appear ~50% from left edge of plate in original landscape image).",
+    "Plate image: 41598_2022_17527_MOESM4_ESM.jpg (4096×1949 px).",
+    "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
+  ],
+
+  "imagePath": "41598_2022_17527_MOESM4_ESM.jpg",
+  "description": "TLCyzer MOESM4 — Cotrimoxazole (SMX component), 5 mg/mL ÷ 6 dilution",
+
+  "invertImage": true,
+  "useGreenChannel": true,
+  "usePolynomialBackground": true,
+  "thresholdFactor": 1.0,
+
+  "_cornerNote": "Corners ROTATED for portrait output.",
+  "corners": [2747, 103, 2747, 1292, 769, 1292, 769, 103],
+
+  "originYFraction": 0.95,
+  "frontYFraction": 0.05,
+
+  "_spotNote": "Rf ≈ 0.52. yFraction ≈ (plate_right_x - spot_x) / plate_width = (2747-1722)/1978 ≈ 0.52.",
+  "referenceSpots": [
+    {
+      "_lane": "Lane 5 — 100% reference standard (top of original image)",
+      "xFraction": 0.14,
+      "yFraction": 0.52,
+      "knownConcentration": 1.667,
+      "apiName": "sulfamethoxazole"
+    },
+    {
+      "_lane": "Lane 4 — sample (90% = 1.500 µg/spot)",
+      "xFraction": 0.29,
+      "yFraction": 0.52,
+      "knownConcentration": 1.500,
+      "apiName": "sulfamethoxazole"
+    },
+    {
+      "_lane": "Lane 3 — 80% reference standard (1.333 µg/spot)",
+      "xFraction": 0.48,
+      "yFraction": 0.52,
+      "knownConcentration": 1.333,
+      "apiName": "sulfamethoxazole"
+    },
+    {
+      "_lane": "Lane 2 — sample (90% = 1.500 µg/spot)",
+      "xFraction": 0.67,
+      "yFraction": 0.52,
+      "knownConcentration": 1.500,
+      "apiName": "sulfamethoxazole"
+    },
+    {
+      "_lane": "Lane 1 — 60% reference standard (1.000 µg/spot, bottom of original image)",
+      "xFraction": 0.82,
+      "yFraction": 0.52,
+      "knownConcentration": 1.000,
+      "apiName": "sulfamethoxazole"
+    }
+  ]
+}

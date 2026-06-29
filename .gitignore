@@ -3,3 +3,13 @@ target/
 *.jar
 !mvnw
 .mvn/wrapper/maven-wrapper.jar
+
+# Validation datasets — images are copyrighted supplementary material,
+# exports are derived outputs; only JSON fixtures are tracked
+validation/**/*.jpg
+validation/**/*.jpeg
+validation/**/*.png
+validation/**/*.tif
+validation/**/*.tiff
+validation/**/*.pdf
+validation/**/*.csv

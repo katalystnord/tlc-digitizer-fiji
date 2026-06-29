@@ -469,6 +469,7 @@ public class TlcDigitizerFrame extends JFrame {
             JButton redetect = new JButton("Re-detect corners automatically");
             redetect.addActionListener(e -> {
                 state.corners = PerspectiveCorrection.detectCorners(state.grayscale);
+                ensureNonDegenerate();
                 cornersToSpinners();
                 updateRoi();
             });
@@ -491,6 +492,7 @@ public class TlcDigitizerFrame extends JFrame {
             if (state.corners == null) {
                 state.corners = PerspectiveCorrection.detectCorners(state.grayscale);
             }
+            ensureNonDegenerate();
             setDisplay(state.grayscale.duplicate(), "TLC Digitizer — Step 2 · Perspective");
             IJ.setTool("multipoint");
             cornersToSpinners();
@@ -533,6 +535,21 @@ public class TlcDigitizerFrame extends JFrame {
                 new float[]{state.corners[0], state.corners[2], state.corners[4], state.corners[6]},
                 new float[]{state.corners[1], state.corners[3], state.corners[5], state.corners[7]}, 4);
             imp.setRoi(roi);
+
+            Overlay ov = new Overlay();
+            Font labelFont = new Font("SansSerif", Font.BOLD, 14);
+            String[] labels = {"TL", "TR", "BR", "BL"};
+            int[] dx = {-22, 5, 5, -22};
+            int[] dy = {-16, -16, 5, 5};
+            for (int i = 0; i < 4; i++) {
+                TextRoi tr = new TextRoi(
+                    state.corners[i * 2] + dx[i],
+                    state.corners[i * 2 + 1] + dy[i],
+                    labels[i], labelFont);
+                tr.setStrokeColor(Color.YELLOW);
+                ov.add(tr);
+            }
+            imp.setOverlay(ov);
             imp.updateAndDraw();
         }
 
@@ -546,6 +563,32 @@ public class TlcDigitizerFrame extends JFrame {
                 state.corners[i * 2 + 1] = poly.ypoints[i];
             }
             cornersToSpinners();
+            updateRoi();
+        }
+
+        private void ensureNonDegenerate() {
+            if (state.corners == null || state.grayscale == null) return;
+            float[] c = state.corners;
+            // Shoelace area of the quadrilateral
+            float area = 0;
+            for (int i = 0; i < 4; i++) {
+                int j = (i + 1) % 4;
+                area += c[i * 2] * c[j * 2 + 1] - c[j * 2] * c[i * 2 + 1];
+            }
+            area = Math.abs(area) / 2f;
+            float imgArea = (float) state.grayscale.getWidth() * state.grayscale.getHeight();
+            if (area < 0.01f * imgArea) {
+                int w = state.grayscale.getWidth();
+                int h = state.grayscale.getHeight();
+                int inX = w / 10, inY = h / 10;
+                state.corners = new float[]{
+                    inX,     inY,         // TL
+                    w - inX, inY,         // TR
+                    w - inX, h - inY,     // BR
+                    inX,     h - inY      // BL
+                };
+                IJ.log("[Step 2] Degenerate corner detection — reset to 10% inset defaults.");
+            }
         }
 
         @Override
@@ -1417,6 +1460,31 @@ public class TlcDigitizerFrame extends JFrame {
         @Override
         void onEnter() {
             nextBtn.setText("Export");
+            String current = pathField.getText().trim();
+            if (current.isEmpty() || current.endsWith("tlc_results.csv")) {
+                pathField.setText(deriveDefaultPath());
+            }
+        }
+
+        private String deriveDefaultPath() {
+            String stem = "tlc_results";
+            String dir  = System.getProperty("user.home") + File.separator;
+            if (state.originalImage != null) {
+                ij.io.FileInfo fi = state.originalImage.getOriginalFileInfo();
+                if (fi != null && fi.fileName != null && !fi.fileName.isEmpty()) {
+                    stem = fi.fileName.replaceAll("\\.[^.]+$", "");
+                    if (fi.directory != null && !fi.directory.isEmpty()) {
+                        dir = fi.directory.endsWith(File.separator)
+                            ? fi.directory : fi.directory + File.separator;
+                    }
+                } else {
+                    String title = state.originalImage.getTitle();
+                    if (title != null && !title.isEmpty()) {
+                        stem = title.replaceAll("\\.[^.]+$", "");
+                    }
+                }
+            }
+            return dir + stem + "-digitized.csv";
         }
 
         @Override

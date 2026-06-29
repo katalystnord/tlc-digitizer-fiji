@@ -1,0 +1,68 @@
+{
+  "_notes": [
+    "API: unidentified (label reads 'DATO R56 S3'). All concentrations in relative % units.",
+    "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
+    "Spot coordinates are visual estimates from the supplementary image; refine by running",
+    "the plugin manually on this file and recording Step 2 corners + Step 4 Rf line positions.",
+    "Lane order in corrected-portrait image: xFraction 0→1 = original-top→original-bottom",
+    "                                         = Lane5(100%)→Lane1(60%)",
+    "Solvent ran left→right in the original landscape image.",
+    "Plate image: 41598_2022_17527_MOESM2_ESM.jpg (4096×1949 px).",
+    "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
+  ],
+
+  "imagePath": "41598_2022_17527_MOESM2_ESM.jpg",
+  "description": "TLCyzer MOESM2 — unknown API (DATO / R56 / S3); relative concentration units",
+
+  "invertImage": true,
+  "useGreenChannel": true,
+  "usePolynomialBackground": true,
+  "thresholdFactor": 1.0,
+
+  "_cornerNote": "Corners given in ROTATED order so warpImage produces portrait output: TL=plate top-right, TR=plate bottom-right, BR=plate bottom-left, BL=plate top-left.",
+  "corners": [2952, 31, 2952, 1292, 738, 1292, 738, 31],
+
+  "_rfNote": "In portrait output: top=front (plate right edge), bottom=origin (plate left edge).",
+  "originYFraction": 0.95,
+  "frontYFraction": 0.05,
+
+  "_spotNote": "5 lanes top-to-bottom in original image = left-to-right in corrected portrait.",
+  "_spotNote2": "yFraction ≈ (plate_right_x - spot_x) / plate_width = (2952-1968)/2214 ≈ 0.44.",
+  "referenceSpots": [
+    {
+      "_lane": "Lane 5 — 100% reference standard (top of original image)",
+      "xFraction": 0.11,
+      "yFraction": 0.44,
+      "knownConcentration": 100.0,
+      "apiName": "api_moesm2"
+    },
+    {
+      "_lane": "Lane 4 — sample (90% of standard)",
+      "xFraction": 0.28,
+      "yFraction": 0.44,
+      "knownConcentration": 90.0,
+      "apiName": "api_moesm2"
+    },
+    {
+      "_lane": "Lane 3 — 80% reference standard",
+      "xFraction": 0.49,
+      "yFraction": 0.44,
+      "knownConcentration": 80.0,
+      "apiName": "api_moesm2"
+    },
+    {
+      "_lane": "Lane 2 — sample (90% of standard)",
+      "xFraction": 0.67,
+      "yFraction": 0.44,
+      "knownConcentration": 90.0,
+      "apiName": "api_moesm2"
+    },
+    {
+      "_lane": "Lane 1 — 60% reference standard (bottom of original image)",
+      "xFraction": 0.85,
+      "yFraction": 0.44,
+      "knownConcentration": 60.0,
+      "apiName": "api_moesm2"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "_notes": [
+    "API: Hydrochlorothiazide (HCT). Visible label: 'A6 R6 P9/2 HCT'.",
+    "100% standard: 2 mg/mL × 2 µL spotting volume = 4.000 µg/spot.",
+    "Solvent: Acetone (per TLCyzer Table 1).",
+    "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
+    "Rf ≈ 0.33 (spots appear at ~30% from left edge in original landscape image).",
+    "Plate image: 41598_2022_17527_MOESM3_ESM.jpg (4096×1949 px).",
+    "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
+  ],
+
+  "imagePath": "41598_2022_17527_MOESM3_ESM.jpg",
+  "description": "TLCyzer MOESM3 — Hydrochlorothiazide (HCT), 2 mg/mL standard",
+
+  "invertImage": true,
+  "useGreenChannel": true,
+  "usePolynomialBackground": true,
+  "thresholdFactor": 1.0,
+
+  "_cornerNote": "Corners ROTATED for portrait output. Plate boundary estimated from image.",
+  "corners": [2973, 164, 2973, 1281, 759, 1281, 759, 164],
+
+  "originYFraction": 0.95,
+  "frontYFraction": 0.05,
+
+  "_spotNote": "Rf ≈ 0.33. yFraction ≈ (plate_right_x - spot_x) / plate_width = (2973-1497)/2214 ≈ 0.67.",
+  "_spotNote2": "xFractions from spot y-positions in original: (y_orig - plate_top) / plate_height.",
+  "referenceSpots": [
+    {
+      "_lane": "Lane 5 — 100% reference standard (top of original image, xFraction≈0.14)",
+      "xFraction": 0.14,
+      "yFraction": 0.67,
+      "knownConcentration": 4.000,
+      "apiName": "hydrochlorothiazide"
+    },
+    {
+      "_lane": "Lane 4 — sample (90% of standard = 3.600 µg/spot)",
+      "xFraction": 0.32,
+      "yFraction": 0.67,
+      "knownConcentration": 3.600,
+      "apiName": "hydrochlorothiazide"
+    },
+    {
+      "_lane": "Lane 3 — 80% reference standard (3.200 µg/spot)",
+      "xFraction": 0.55,
+      "yFraction": 0.67,
+      "knownConcentration": 3.200,
+      "apiName": "hydrochlorothiazide"
+    },
+    {
+      "_lane": "Lane 2 — sample (90% = 3.600 µg/spot)",
+      "xFraction": 0.69,
+      "yFraction": 0.67,
+      "knownConcentration": 3.600,
+      "apiName": "hydrochlorothiazide"
+    },
+    {
+      "_lane": "Lane 1 — 60% reference standard (2.400 µg/spot, bottom of original image)",
+      "xFraction": 0.88,
+      "yFraction": 0.67,
+      "knownConcentration": 2.400,
+      "apiName": "hydrochlorothiazide"
+    }
+  ]
+}
