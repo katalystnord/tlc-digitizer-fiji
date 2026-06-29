@@ -154,7 +154,28 @@ public final class ValidationRunner {
         int corrH = corrected.getHeight();
 
         // ----- Stage 5: spot detection ---------------------------------------
-        List<Spot> detected = SpotDetector.detect(corrected, (float) fixture.thresholdFactor);
+        // Detect on the polynomial-corrected image normalised to [0,255].
+        // Background correction clamps negatives to 0, leaving background≈0 and
+        // spots as small positive residuals. The raw corrected image has mean≈0,
+        // so mean×mult is near-zero and thresholds everything; normalising first
+        // rescales the sparse positive residuals to span [0,255] so that
+        // mean×mult correctly separates spots from background.
+        FloatProcessor detectionImage;
+        {
+            float[] cpx = (float[]) corrected.getPixels();
+            float cmax = 0;
+            for (float v : cpx) if (v > cmax) cmax = v;
+            if (cmax > 0) {
+                float scale = 255f / cmax;
+                float[] norm = new float[cpx.length];
+                for (int i = 0; i < cpx.length; i++) norm[i] = cpx[i] * scale;
+                detectionImage = new FloatProcessor(corrected.getWidth(), corrected.getHeight(), norm, null);
+            } else {
+                detectionImage = corrected;
+            }
+        }
+        List<Spot> detected = SpotDetector.detect(detectionImage, (float) fixture.thresholdFactor);
+        // (debug output removed)
         float medR = medianRadius(detected);
 
         // ----- Match fixture reference spots to detected spots ---------------
@@ -196,14 +217,53 @@ public final class ValidationRunner {
         // ----- Stage 4: Rf values --------------------------------------------
         RfCalculator.assignAll(refSpots, fixture.originYFraction, fixture.frontYFraction);
 
-        // ----- Stage 6: integration ------------------------------------------
-        SpotIntegrator.integrateAll(corrected, refSpots);
+        // ----- Stage 6: radius optimisation + integration ----------------------
+        // Mirror the interactive plugin's "Optimise R²" workflow: grid-search radii
+        // from 0.5× to 2.5× the initial radius and pick the scale with the highest
+        // all-reference calibration R².  Integrates on the warped image (not the
+        // polynomial-corrected image) with per-spot local background subtraction.
+        // Cap polynomial degree so n >= degree+2 (polynomial path always active).
+        int sgDeg = fixture.sgDegree > 0 ? fixture.sgDegree : 3;
+        sgDeg = Math.min(sgDeg, Math.max(1, refSpots.size() - 2));
 
-        // Apply S-G per-spot correction after integration if Method B selected.
-        // (The polynomial pass above was used purely to normalise pixel values.)
-        if (!fixture.usePolynomialBackground) {
-            BackgroundCorrection.applyPerSpotPolynomial(refSpots, warped, fixture.sgDegree);
+        float[] baseRadii = new float[refSpots.size()];
+        for (int k = 0; k < refSpots.size(); k++) baseRadii[k] = refSpots.get(k).radius;
+
+        double bestR2 = -Double.MAX_VALUE;
+        double bestScale = 1.0;
+        for (int step = 5; step <= 25; step++) {
+            double scale = step / 10.0;
+            List<Spot> temp = new ArrayList<>();
+            for (int k = 0; k < refSpots.size(); k++) {
+                Spot orig = refSpots.get(k);
+                Spot t = new Spot(orig.id, orig.centroidX, orig.centroidY,
+                        (float)(baseRadii[k] * scale), corrH);
+                t.isReference = true;
+                t.referenceConcentration = orig.referenceConcentration;
+                t.rfValue = orig.rfValue;
+                temp.add(t);
+            }
+            SpotIntegrator.integrateAll(warped, temp);
+            BackgroundCorrection.applyPerSpotPolynomial(temp, warped, sgDeg);
+            try {
+                CalibrationModel m = CalibrationModel.fit(temp, CalibrationModel.ModelType.LINEAR);
+                if (m.rSquared > bestR2) { bestR2 = m.rSquared; bestScale = scale; }
+            } catch (IllegalArgumentException ignored) {}
         }
+
+        // Rebuild refSpots with best scale permanently applied
+        for (int k = 0; k < refSpots.size(); k++) {
+            Spot orig = refSpots.get(k);
+            Spot scaled = new Spot(orig.id, orig.centroidX, orig.centroidY,
+                    (float)(baseRadii[k] * bestScale), corrH);
+            scaled.isReference = true;
+            scaled.referenceConcentration = orig.referenceConcentration;
+            scaled.rfValue = orig.rfValue;
+            refSpots.set(k, scaled);
+        }
+        SpotIntegrator.integrateAll(warped, refSpots);
+        BackgroundCorrection.applyPerSpotPolynomial(refSpots, warped, sgDeg);
+        // (debug output removed)
 
         // ----- Stage 7: leave-one-out calibration ----------------------------
         List<SpotResult> results = new ArrayList<>();

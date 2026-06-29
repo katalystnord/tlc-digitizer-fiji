@@ -3,11 +3,13 @@
     "API: Sulfamethoxazole (SMX), from cotrimoxazole plate, diluted 1:6.",
     "Label visible: 'Wt? RC 21.4'. Identified as cotrimoxazole by agent analysis of supplement PDF.",
     "SMX 100% standard: 5 mg/mL / 6 (dilution) × 2 µL spotting = 1.667 µg/spot.",
-    "TMP 100% standard: 1 mg/mL / 6 × 2 µL = 0.333 µg/spot (second compound, may also be visible).",
-    "Only the 5 clearly visible spots (one compound column) are encoded here.",
-    "If a second column of spots (TMP, at different Rf) is visible after detection, add them.",
+    "TMP 100% standard: 1 mg/mL / 6 × 2 µL = 0.333 µg/spot (second compound, higher Rf).",
+    "Only the 5 SMX spots are encoded here.",
     "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
-    "Rf ≈ 0.52 (spots appear ~50% from left edge of plate in original landscape image).",
+    "Corrected image size observed from plugin run: 1512×2958.",
+    "Lane order in portrait (left→right): 60%, 90%, 80%, 90%, 100%.",
+    "thresholdFactor, originYFraction, frontYFraction, and spot positions taken from",
+    "      exported CSV (2026-06-29 20:44). Calibration R²=0.9996.",
     "Plate image: 41598_2022_17527_MOESM4_ESM.jpg (4096×1949 px).",
     "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
   ],
@@ -17,50 +19,51 @@
 
   "invertImage": true,
   "useGreenChannel": true,
-  "usePolynomialBackground": true,
+  "usePolynomialBackground": false,
+  "_thresholdNote": "Interactive UI used S-G background + threshold 3.13. Runner uses polynomial background; 1.0 is the appropriate detection threshold for that path.",
   "thresholdFactor": 1.0,
 
-  "_cornerNote": "Corners ROTATED for portrait output.",
+  "_cornerNote": "Corners ROTATED for portrait output. Exact coordinates from plugin Step 2.",
   "corners": [2747, 103, 2747, 1292, 769, 1292, 769, 103],
 
-  "originYFraction": 0.95,
-  "frontYFraction": 0.05,
+  "originYFraction": 0.86004055,
+  "frontYFraction": 0.1764706,
 
-  "_spotNote": "Rf ≈ 0.52. yFraction ≈ (plate_right_x - spot_x) / plate_width = (2747-1722)/1978 ≈ 0.52.",
+  "_spotNote": "xFraction/yFraction taken from CSV centroid_x_fraction/centroid_y_fraction (plugin run 2026-06-29).",
   "referenceSpots": [
     {
-      "_lane": "Lane 5 — 100% reference standard (top of original image)",
-      "xFraction": 0.14,
-      "yFraction": 0.52,
-      "knownConcentration": 1.667,
+      "_lane": "Spot 1 — 60% reference standard (1.000 µg/spot)",
+      "xFraction": 0.148919,
+      "yFraction": 0.435337,
+      "knownConcentration": 1.000,
       "apiName": "sulfamethoxazole"
     },
     {
-      "_lane": "Lane 4 — sample (90% = 1.500 µg/spot)",
-      "xFraction": 0.29,
-      "yFraction": 0.52,
+      "_lane": "Spot 2 — 90% sample (1.500 µg/spot expected)",
+      "xFraction": 0.316744,
+      "yFraction": 0.434713,
       "knownConcentration": 1.500,
       "apiName": "sulfamethoxazole"
     },
     {
-      "_lane": "Lane 3 — 80% reference standard (1.333 µg/spot)",
-      "xFraction": 0.48,
-      "yFraction": 0.52,
+      "_lane": "Spot 3 — 80% reference standard (1.333 µg/spot)",
+      "xFraction": 0.528130,
+      "yFraction": 0.433358,
       "knownConcentration": 1.333,
       "apiName": "sulfamethoxazole"
     },
     {
-      "_lane": "Lane 2 — sample (90% = 1.500 µg/spot)",
-      "xFraction": 0.67,
-      "yFraction": 0.52,
+      "_lane": "Spot 4 — 90% sample (1.500 µg/spot expected)",
+      "xFraction": 0.711341,
+      "yFraction": 0.436307,
       "knownConcentration": 1.500,
       "apiName": "sulfamethoxazole"
     },
     {
-      "_lane": "Lane 1 — 60% reference standard (1.000 µg/spot, bottom of original image)",
-      "xFraction": 0.82,
-      "yFraction": 0.52,
-      "knownConcentration": 1.000,
+      "_lane": "Spot 5 — 100% reference standard (1.667 µg/spot)",
+      "xFraction": 0.855928,
+      "yFraction": 0.436981,
+      "knownConcentration": 1.667,
       "apiName": "sulfamethoxazole"
     }
   ]

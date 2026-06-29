@@ -4,7 +4,12 @@
     "100% standard: 2 mg/mL × 2 µL spotting volume = 4.000 µg/spot.",
     "Solvent: Acetone (per TLCyzer Table 1).",
     "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
-    "Rf ≈ 0.33 (spots appear at ~30% from left edge in original landscape image).",
+    "Corrected image size observed from plugin run: 1494×3012.",
+    "Lane order in portrait (left→right): 60%, 90%, 80%, 90%, 100%.",
+    "NOTE: original fixture had lanes reversed (100% on left) — corrected here based on",
+    "      plate annotation and plugin interactive run on 2026-06-29.",
+    "thresholdFactor, originYFraction, frontYFraction, and spot positions taken from",
+    "      exported CSV (2026-06-29 20:41).",
     "Plate image: 41598_2022_17527_MOESM3_ESM.jpg (4096×1949 px).",
     "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
   ],
@@ -14,51 +19,51 @@
 
   "invertImage": true,
   "useGreenChannel": true,
-  "usePolynomialBackground": true,
+  "usePolynomialBackground": false,
+  "_thresholdNote": "Interactive UI used S-G background + threshold 3.58. Runner uses polynomial background; 1.0 is the appropriate detection threshold for that path.",
   "thresholdFactor": 1.0,
 
-  "_cornerNote": "Corners ROTATED for portrait output. Plate boundary estimated from image.",
+  "_cornerNote": "Corners ROTATED for portrait output. Exact coordinates from plugin Step 2.",
   "corners": [2973, 164, 2973, 1281, 759, 1281, 759, 164],
 
-  "originYFraction": 0.95,
-  "frontYFraction": 0.05,
+  "originYFraction": 0.8505976,
+  "frontYFraction": 0.16733068,
 
-  "_spotNote": "Rf ≈ 0.33. yFraction ≈ (plate_right_x - spot_x) / plate_width = (2973-1497)/2214 ≈ 0.67.",
-  "_spotNote2": "xFractions from spot y-positions in original: (y_orig - plate_top) / plate_height.",
+  "_spotNote": "xFraction/yFraction taken from CSV centroid_x_fraction/centroid_y_fraction (plugin run 2026-06-29).",
   "referenceSpots": [
     {
-      "_lane": "Lane 5 — 100% reference standard (top of original image, xFraction≈0.14)",
-      "xFraction": 0.14,
-      "yFraction": 0.67,
-      "knownConcentration": 4.000,
+      "_lane": "Spot 1 — 60% reference standard (2.400 µg/spot)",
+      "xFraction": 0.176543,
+      "yFraction": 0.323650,
+      "knownConcentration": 2.400,
       "apiName": "hydrochlorothiazide"
     },
     {
-      "_lane": "Lane 4 — sample (90% of standard = 3.600 µg/spot)",
-      "xFraction": 0.32,
-      "yFraction": 0.67,
+      "_lane": "Spot 2 — 90% sample (3.600 µg/spot expected)",
+      "xFraction": 0.359118,
+      "yFraction": 0.327255,
       "knownConcentration": 3.600,
       "apiName": "hydrochlorothiazide"
     },
     {
-      "_lane": "Lane 3 — 80% reference standard (3.200 µg/spot)",
-      "xFraction": 0.55,
-      "yFraction": 0.67,
+      "_lane": "Spot 3 — 80% reference standard (3.200 µg/spot)",
+      "xFraction": 0.533134,
+      "yFraction": 0.328295,
       "knownConcentration": 3.200,
       "apiName": "hydrochlorothiazide"
     },
     {
-      "_lane": "Lane 2 — sample (90% = 3.600 µg/spot)",
-      "xFraction": 0.69,
-      "yFraction": 0.67,
+      "_lane": "Spot 4 — 90% sample (3.600 µg/spot expected)",
+      "xFraction": 0.718209,
+      "yFraction": 0.328892,
       "knownConcentration": 3.600,
       "apiName": "hydrochlorothiazide"
     },
     {
-      "_lane": "Lane 1 — 60% reference standard (2.400 µg/spot, bottom of original image)",
-      "xFraction": 0.88,
-      "yFraction": 0.67,
-      "knownConcentration": 2.400,
+      "_lane": "Spot 5 — 100% reference standard (4.000 µg/spot)",
+      "xFraction": 0.871261,
+      "yFraction": 0.326859,
+      "knownConcentration": 4.000,
       "apiName": "hydrochlorothiazide"
     }
   ]
