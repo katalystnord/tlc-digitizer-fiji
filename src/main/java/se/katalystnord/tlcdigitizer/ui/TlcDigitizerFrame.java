@@ -537,10 +537,14 @@ public class TlcDigitizerFrame extends JFrame {
             imp.setRoi(roi);
 
             Overlay ov = new Overlay();
-            Font labelFont = new Font("SansSerif", Font.BOLD, 14);
+            int imgW = (state.grayscale != null) ? state.grayscale.getWidth() : 1000;
+            int cornerFontSize = Math.max(24, Math.min(120, imgW / 40));
+            Font labelFont = new Font("SansSerif", Font.BOLD, cornerFontSize);
             String[] labels = {"TL", "TR", "BR", "BL"};
-            int[] dx = {-22, 5, 5, -22};
-            int[] dy = {-16, -16, 5, 5};
+            int lx = (int)(cornerFontSize * 1.4);  // left-side offset (approx 2-char width)
+            int ly = (int)(cornerFontSize * 1.1);  // vertical offset (approx 1 line height)
+            int[] dx = {-lx, 5, 5, -lx};
+            int[] dy = {-ly, -ly, 5, 5};
             for (int i = 0; i < 4; i++) {
                 TextRoi tr = new TextRoi(
                     state.corners[i * 2] + dx[i],
@@ -1084,6 +1088,21 @@ public class TlcDigitizerFrame extends JFrame {
     // Step 6 — Calibration
     // -----------------------------------------------------------------------
 
+    // Spot colour palette — index by (spot.id - 1) % SPOT_COLORS.length.
+    // Bright, distinct colours readable on both light and dark grayscale backgrounds.
+    static final Color[] SPOT_COLORS = {
+        new Color(255, 220,   0),  // gold
+        new Color(  0, 210, 255),  // cyan
+        new Color(255,  80,  80),  // coral
+        new Color( 80, 235,  80),  // lime
+        new Color(255, 140, 255),  // pink
+        new Color(255, 155,  30),  // orange
+        new Color(160, 255, 255),  // sky
+        new Color(210, 210, 255),  // lavender
+        new Color(255, 255, 120),  // pale yellow
+        new Color(160, 255, 140),  // pale green
+    };
+
     class Step6Panel extends AbstractStepPanel {
         private JPanel rows;
         private JScrollPane scroll;
@@ -1265,7 +1284,10 @@ public class TlcDigitizerFrame extends JFrame {
             rows.add(bold("Conc. (µg/mL)"));
 
             for (Spot s : state.spots) {
-                rows.add(new JLabel(String.valueOf(s.id)));
+                JLabel idLbl = new JLabel(String.valueOf(s.id));
+                idLbl.setForeground(SPOT_COLORS[(s.id - 1) % SPOT_COLORS.length]);
+                idLbl.setFont(idLbl.getFont().deriveFont(Font.BOLD));
+                rows.add(idLbl);
                 rows.add(new JLabel(String.format("%.3f", s.rfValue)));
 
                 JCheckBox cb = new JCheckBox();
@@ -1681,10 +1703,12 @@ public class TlcDigitizerFrame extends JFrame {
     private static void updateSpotOverlay(Overlay ov, ImagePlus imp, List<Spot> spots) {
         ov.clear();
         for (Spot s : spots) {
+            Color c = SPOT_COLORS[(s.id - 1) % SPOT_COLORS.length];
+
             OvalRoi oval = new OvalRoi(
                 s.centroidX - s.radius, s.centroidY - s.radius,
                 s.radius * 2, s.radius * 2);
-            oval.setStrokeColor(Color.YELLOW);
+            oval.setStrokeColor(c);
             oval.setStrokeWidth(Math.max(1.5, s.radius * 0.06));
             oval.setName("spot_" + s.id);
             ov.add(oval);
@@ -1698,7 +1722,7 @@ public class TlcDigitizerFrame extends JFrame {
             double tx = s.centroidX - idStr.length() * fontSize * 0.30;
             double ty = s.centroidY - fontSize * 0.38;
             TextRoi label = new TextRoi(tx, ty, idStr, labelFont);
-            label.setStrokeColor(Color.YELLOW);
+            label.setStrokeColor(c);
             label.setName("label_" + s.id);
             ov.add(label);
         }
