@@ -852,6 +852,7 @@ public class TlcDigitizerFrame extends JFrame {
         private JSlider slider;
         private JSpinner multSp;
         private JLabel countLabel;
+        private JLabel liveR2Label;
 
         private List<Spot> spots = new ArrayList<Spot>();
         private final List<List<Spot>> spotHistory = new ArrayList<List<Spot>>();
@@ -915,6 +916,13 @@ public class TlcDigitizerFrame extends JFrame {
             controls.add(spinRow);
             controls.add(Box.createVerticalStrut(6));
             controls.add(countLabel);
+
+            liveR2Label = new JLabel(
+                "<html><body style='color:gray;font-style:italic'>" +
+                "R² — (complete Step 6 first to see live calibration quality)</body></html>");
+            liveR2Label.setFont(liveR2Label.getFont().deriveFont(12f));
+            controls.add(Box.createVerticalStrut(4));
+            controls.add(liveR2Label);
             add(controls, BorderLayout.CENTER);
         }
 
@@ -1004,6 +1012,7 @@ public class TlcDigitizerFrame extends JFrame {
             spotHistory.clear();
             spots = SpotDetector.detect(source(), mult);
             refreshOverlay();
+            updateLiveR2();
         }
 
         private void refreshOverlay() {
@@ -1025,6 +1034,65 @@ public class TlcDigitizerFrame extends JFrame {
             for (int i = 0; i < list.size(); i++) {
                 Spot o = list.get(i);
                 list.set(i, new Spot(i + 1, o.centroidX, o.centroidY, o.radius, imageHeight));
+            }
+        }
+
+        private void updateLiveR2() {
+            // Only meaningful once the user has completed Step 6 at least once
+            List<Spot> prevRefs = state.spots.stream()
+                .filter(s -> s.isReference && !Double.isNaN(s.referenceConcentration)
+                          && s.referenceConcentration > 0)
+                .collect(Collectors.toList());
+
+            if (prevRefs.isEmpty() || state.corrected == null || spots.isEmpty()) {
+                liveR2Label.setText(
+                    "<html><body style='color:gray;font-style:italic'>" +
+                    "R² — (complete Step 6 first to see live calibration quality)</body></html>");
+                return;
+            }
+
+            int imgH = state.corrected.getHeight();
+            List<Spot> matchedRefs = new ArrayList<>();
+            for (Spot ref : prevRefs) {
+                Spot nearest = null;
+                double bestDist = Double.MAX_VALUE;
+                for (Spot det : spots) {
+                    double dx = det.centroidX - ref.centroidX;
+                    double dy = det.centroidY - ref.centroidY;
+                    double d  = Math.sqrt(dx * dx + dy * dy);
+                    if (d < bestDist) { bestDist = d; nearest = det; }
+                }
+                // Accept match only if the nearest detected spot is within 3× the reference radius
+                if (nearest != null && bestDist < ref.radius * 3.0) {
+                    Spot m = new Spot(ref.id, nearest.centroidX, nearest.centroidY,
+                        nearest.radius, imgH);
+                    m.isReference = true;
+                    m.referenceConcentration = ref.referenceConcentration;
+                    SpotIntegrator.integrate(state.corrected, m);
+                    matchedRefs.add(m);
+                }
+            }
+
+            if (matchedRefs.size() < 2) {
+                liveR2Label.setText(
+                    "<html><body style='color:gray;font-style:italic'>" +
+                    "R² — (reference spots not found at this threshold)</body></html>");
+                return;
+            }
+
+            try {
+                CalibrationModel cal = CalibrationModel.fit(matchedRefs,
+                    CalibrationModel.ModelType.LINEAR);
+                String col = cal.rSquared >= 0.99 ? "green" :
+                             cal.rSquared >= 0.90 ? "darkorange" : "red";
+                liveR2Label.setText(String.format(
+                    "<html><b style='color:%s'>R² = %.3f</b>" +
+                    "&nbsp;&nbsp;<span style='color:gray;font-size:10px'>" +
+                    "coarse · %d/%d refs matched · from Step 6</span></html>",
+                    col, cal.rSquared, matchedRefs.size(), prevRefs.size()));
+            } catch (Exception ex) {
+                liveR2Label.setText(
+                    "<html><body style='color:gray;font-style:italic'>R² — (error)</body></html>");
             }
         }
 
