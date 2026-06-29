@@ -1106,6 +1106,10 @@ public class TlcDigitizerFrame extends JFrame {
         private JSpinner manualLoqSpinner;
         private double cachedBgSigma = Double.NaN;
 
+        // Live R² preview + optimize (SOUTH, above calResultsLabel)
+        private JLabel liveR2Label;
+        private JButton optimizeBtn;
+
         // Calibration results strip (SOUTH) — populated after fitting
         private JLabel calResultsLabel;
 
@@ -1135,6 +1139,7 @@ public class TlcDigitizerFrame extends JFrame {
                     lodLoqSection.setVisible(t == CalibrationModel.ModelType.LINEAR);
                     north.revalidate();
                     north.repaint();
+                    liveCalibUpdate();
                 });
                 modelGroup.add(modelButtons[i]);
                 radios.add(modelButtons[i]);
@@ -1214,13 +1219,37 @@ public class TlcDigitizerFrame extends JFrame {
             scroll.setPreferredSize(new Dimension(420, 240));
             add(scroll, BorderLayout.CENTER);
 
+            // Live R² bar
+            liveR2Label = new JLabel(
+                "<html><body style='color:gray;font-style:italic'>" +
+                "Assign ≥3 references to preview R²</body></html>");
+            liveR2Label.setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
+
+            optimizeBtn = new JButton("Optimize radius");
+            optimizeBtn.setEnabled(false);
+            optimizeBtn.setToolTipText(
+                "Search for the integration radius scale that maximises calibration R²");
+            optimizeBtn.addActionListener(e -> optimizeIntegrationRadius());
+
+            JPanel liveRow = new JPanel(new BorderLayout(6, 0));
+            liveRow.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(2, 0, 2, 4)));
+            liveRow.add(liveR2Label, BorderLayout.CENTER);
+            liveRow.add(optimizeBtn, BorderLayout.EAST);
+
             calResultsLabel = new JLabel(
                 "<html><body style='width:480px;color:gray;font-style:italic'>" +
                 "Calibration results will appear here after clicking Next.</body></html>");
             calResultsLabel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
                 BorderFactory.createEmptyBorder(5, 4, 5, 4)));
-            add(calResultsLabel, BorderLayout.SOUTH);
+
+            JPanel southStack = new JPanel();
+            southStack.setLayout(new BoxLayout(southStack, BoxLayout.Y_AXIS));
+            southStack.add(liveRow);
+            southStack.add(calResultsLabel);
+            add(southStack, BorderLayout.SOUTH);
         }
 
         @Override
@@ -1257,6 +1286,10 @@ public class TlcDigitizerFrame extends JFrame {
             rows.repaint();
             scroll.revalidate();
 
+            // Wire up live R² — re-evaluate whenever the user ticks or types
+            for (JCheckBox cb : refBoxes)       cb.addItemListener(e  -> liveCalibUpdate());
+            for (JSpinner   sp : concSpinners)  sp.addChangeListener(e -> liveCalibUpdate());
+
             // Pre-compute background sigma for the S/N convention
             if (state.corrected != null) {
                 cachedBgSigma = CalibrationModel.estimateBackgroundSigma(
@@ -1279,6 +1312,8 @@ public class TlcDigitizerFrame extends JFrame {
             Overlay ov = new Overlay();
             displayWindow.setOverlay(ov);
             updateSpotOverlay(ov, displayWindow, state.spots);
+
+            liveCalibUpdate();
         }
 
         private void updateLodLoqConditionalPanel(CalibrationModel.LodLoqConvention conv) {
@@ -1294,6 +1329,133 @@ public class TlcDigitizerFrame extends JFrame {
             }
             lodLoqSection.revalidate();
             lodLoqSection.repaint();
+        }
+
+        private void liveCalibUpdate() {
+            List<Spot> refs = currentRefSpots();
+            if (refs.size() < 3) {
+                liveR2Label.setText(
+                    "<html><body style='color:gray;font-style:italic'>" +
+                    "Assign ≥3 references to preview R²</body></html>");
+                optimizeBtn.setEnabled(false);
+                return;
+            }
+            try {
+                CalibrationModel m = CalibrationModel.fit(refs, selectedModelType());
+                String col = m.rSquared >= 0.99 ? "green" :
+                             m.rSquared >= 0.90 ? "darkorange" : "red";
+                liveR2Label.setText(String.format(
+                    "<html><b style='color:%s'>R² = %.4f</b>" +
+                    "&nbsp;&nbsp;<span style='color:gray;font-size:10px'>live preview</span></html>",
+                    col, m.rSquared));
+                optimizeBtn.setEnabled(true);
+            } catch (Exception ex) {
+                liveR2Label.setText(
+                    "<html><i style='color:red'>Calibration error</i></html>");
+                optimizeBtn.setEnabled(false);
+            }
+        }
+
+        private List<Spot> currentRefSpots() {
+            int imgH = (state.corrected != null) ? state.corrected.getHeight() : 1;
+            List<Spot> refs = new ArrayList<>();
+            for (int i = 0; i < state.spots.size() && i < refBoxes.size(); i++) {
+                if (!refBoxes.get(i).isSelected()) continue;
+                double conc = ((Number) concSpinners.get(i).getValue()).doubleValue();
+                if (conc <= 0) continue;
+                Spot s = state.spots.get(i);
+                Spot ref = new Spot(s.id, s.centroidX, s.centroidY, s.radius, imgH);
+                ref.integrationValue = s.integrationValue;
+                ref.isReference = true;
+                ref.referenceConcentration = conc;
+                refs.add(ref);
+            }
+            return refs;
+        }
+
+        private CalibrationModel.ModelType selectedModelType() {
+            CalibrationModel.ModelType[] types = CalibrationModel.ModelType.values();
+            for (int i = 0; i < modelButtons.length; i++) {
+                if (modelButtons[i].isSelected()) return types[i];
+            }
+            return CalibrationModel.ModelType.LINEAR;
+        }
+
+        private void optimizeIntegrationRadius() {
+            List<Spot> curRefs = currentRefSpots();
+            if (curRefs.size() < 3 || state.corrected == null) return;
+            CalibrationModel.ModelType mt = selectedModelType();
+            double baseR2 = CalibrationModel.fit(curRefs, mt).rSquared;
+            double bestR2 = baseR2;
+            double bestScale = 1.0;
+            int imgH = state.corrected.getHeight();
+
+            // Grid search: radius scale 0.5× to 2.5× in steps of 0.05 (41 candidates)
+            for (int step = 5; step <= 25; step++) {
+                double scale = step / 10.0;
+                List<Spot> tempRefs = new ArrayList<>();
+                for (int i = 0; i < state.spots.size() && i < refBoxes.size(); i++) {
+                    if (!refBoxes.get(i).isSelected()) continue;
+                    double conc = ((Number) concSpinners.get(i).getValue()).doubleValue();
+                    if (conc <= 0) continue;
+                    Spot orig = state.spots.get(i);
+                    Spot temp = new Spot(orig.id, orig.centroidX, orig.centroidY,
+                        (float)(orig.radius * scale), imgH);
+                    temp.isReference = true;
+                    temp.referenceConcentration = conc;
+                    SpotIntegrator.integrate(state.corrected, temp);
+                    tempRefs.add(temp);
+                }
+                if (tempRefs.size() < 3) continue;
+                try {
+                    double r2 = CalibrationModel.fit(tempRefs, mt).rSquared;
+                    if (r2 > bestR2) { bestR2 = r2; bestScale = scale; }
+                } catch (Exception ignored) {}
+            }
+
+            if (bestScale == 1.0 || bestR2 <= baseR2 + 0.005) {
+                JOptionPane.showMessageDialog(TlcDigitizerFrame.this,
+                    String.format("<html>Current radius is already optimal.<br>R² = %.4f</html>",
+                        baseR2),
+                    "Optimize Integration Radius", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            int choice = JOptionPane.showConfirmDialog(TlcDigitizerFrame.this,
+                String.format(
+                    "<html>Optimal integration radius: <b>%.1f×</b> the detected radius<br>" +
+                    "R²: %.4f &rarr; <b>%.4f</b><br><br>" +
+                    "Apply? All spot integration values will be recalculated.</html>",
+                    bestScale, baseR2, bestR2),
+                "Optimize Integration Radius", JOptionPane.YES_NO_OPTION);
+            if (choice != JOptionPane.YES_OPTION) return;
+
+            // Rebuild all spots with the optimal radius scale and re-integrate
+            final double scale = bestScale;
+            List<Spot> newSpots = new ArrayList<>();
+            for (Spot s : state.spots) {
+                Spot scaled = new Spot(s.id, s.centroidX, s.centroidY,
+                    (float)(s.radius * scale), imgH);
+                scaled.rfValue              = s.rfValue;
+                scaled.lane                 = s.lane;
+                scaled.isReference          = s.isReference;
+                scaled.referenceConcentration = s.referenceConcentration;
+                SpotIntegrator.integrate(state.corrected, scaled);
+                newSpots.add(scaled);
+            }
+            state.spots = newSpots;
+
+            // Refresh overlay to reflect new radii
+            ImagePlus dispImp = getDisplayWindow();
+            if (dispImp != null) {
+                Overlay ov = dispImp.getOverlay();
+                if (ov == null) { ov = new Overlay(); dispImp.setOverlay(ov); }
+                updateSpotOverlay(ov, dispImp, state.spots);
+            }
+
+            IJ.log(String.format("[Step 6] Integration radius optimized: %.1f× — R² %.4f → %.4f",
+                scale, baseR2, bestR2));
+            liveCalibUpdate();
         }
 
         private JLabel bold(String text) {
