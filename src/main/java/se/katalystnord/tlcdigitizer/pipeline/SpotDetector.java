@@ -217,6 +217,66 @@ public final class SpotDetector {
         return new Spot(-1, cx, cy, r, imageHeight);
     }
 
+    /**
+     * Refines a spot centroid using intensity-weighted centre-of-mass.
+     *
+     * <p>Searches within {@code searchRadius} pixels of the initial estimate
+     * {@code (cx, cy)} on a background-corrected image where background ≈ 0
+     * and spots are positive peaks. Pixels above the local mean of the disk
+     * are weighted by intensity to compute the refined centre.
+     *
+     * <p>Useful both after auto-detection (sub-pixel accuracy) and for manual
+     * fallback positions from validation fixtures (corrects rough estimates).
+     *
+     * @param fp           background-corrected image (background ≈ 0, spots bright)
+     * @param cx           initial x estimate (image pixels)
+     * @param cy           initial y estimate (image pixels)
+     * @param searchRadius search disk radius (image pixels)
+     * @return refined {@code {x, y}}, or {@code null} if no above-threshold
+     *         pixels were found (region looks like pure background)
+     */
+    public static float[] refineCentroid(FloatProcessor fp,
+                                         float cx, float cy, float searchRadius) {
+        int w = fp.getWidth(), h = fp.getHeight();
+        float r2 = searchRadius * searchRadius;
+
+        int x0 = Math.max(0, (int)(cx - searchRadius));
+        int y0 = Math.max(0, (int)(cy - searchRadius));
+        int x1 = Math.min(w - 1, (int)(cx + searchRadius));
+        int y1 = Math.min(h - 1, (int)(cy + searchRadius));
+
+        // Mean intensity within the disk (threshold)
+        float diskSum = 0;
+        int   diskN   = 0;
+        for (int y = y0; y <= y1; y++) {
+            for (int x = x0; x <= x1; x++) {
+                float dx = x - cx, dy = y - cy;
+                if (dx * dx + dy * dy > r2) continue;
+                diskSum += fp.getf(x, y);
+                diskN++;
+            }
+        }
+        if (diskN == 0) return null;
+        float threshold = diskSum / diskN;
+
+        // Intensity-weighted centroid of above-threshold pixels
+        float wx = 0, wy = 0, wsum = 0;
+        for (int y = y0; y <= y1; y++) {
+            for (int x = x0; x <= x1; x++) {
+                float dx = x - cx, dy = y - cy;
+                if (dx * dx + dy * dy > r2) continue;
+                float v = fp.getf(x, y);
+                if (v > threshold) {
+                    wx   += v * x;
+                    wy   += v * y;
+                    wsum += v;
+                }
+            }
+        }
+        if (wsum == 0) return null;  // pure-background disk: all values ~ 0
+        return new float[]{wx / wsum, wy / wsum};
+    }
+
     // -------------------------------------------------------------------------
     // Algorithm steps (package-private for unit testing)
     // -------------------------------------------------------------------------

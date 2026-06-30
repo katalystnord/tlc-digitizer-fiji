@@ -142,6 +142,13 @@ public class ValidationFixture {
          * or the median detected radius if no spot was matched.
          */
         public float radiusOverride = 0;
+
+        /**
+         * Optional centroid-refinement search radius in corrected-image pixels.
+         * 0 (default) uses the fixture-level default (5% of corrected image width).
+         * Set larger for spots with rough fixture positions (e.g. visual estimates).
+         */
+        public float refineRadius = 0;
     }
 
     // -------------------------------------------------------------------------

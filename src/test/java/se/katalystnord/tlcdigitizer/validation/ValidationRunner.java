@@ -285,7 +285,6 @@ public final class ValidationRunner {
         }
         SpotIntegrator.integrateAll(integrationBase, refSpots);
         BackgroundCorrection.applyPerSpotPolynomial(refSpots, integrationBase, sgDeg);
-        // (debug output removed)
 
         // ----- Stage 7: leave-one-out calibration ----------------------------
         List<SpotResult> results = new ArrayList<>();
