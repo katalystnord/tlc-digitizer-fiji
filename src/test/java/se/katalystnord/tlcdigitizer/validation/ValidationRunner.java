@@ -247,6 +247,10 @@ public final class ValidationRunner {
         float[] baseRadii = new float[refSpots.size()];
         for (int k = 0; k < refSpots.size(); k++) baseRadii[k] = refSpots.get(k).radius;
 
+        // No overlap cap here: the runner integrates with per-spot S-G correction which
+        // tolerates mild overlap at large scales.  Overlap capping belongs in the
+        // interactive UI (Step 6) where polynomial-mode has no per-spot correction.
+
         double bestR2 = -Double.MAX_VALUE;
         double bestScale = 1.0;
         for (int step = 5; step <= 25; step++) {

@@ -1545,9 +1545,23 @@ public class TlcDigitizerFrame extends JFrame {
             double bestScale = 1.0;
             int imgH = state.corrected.getHeight();
 
-            // Grid search: radius scale 0.5× to 2.5× in steps of 0.05 (41 candidates)
+            // Cap scale so no two spot circles overlap (90% of half inter-centroid distance).
+            double maxSafeScale = 2.5;
+            for (Spot a : state.spots) {
+                for (Spot b : state.spots) {
+                    if (a == b || a.radius <= 0) continue;
+                    double dx = a.centroidX - b.centroidX;
+                    double dy = a.centroidY - b.centroidY;
+                    double halfGap = Math.sqrt(dx * dx + dy * dy) * 0.9 / 2.0;
+                    maxSafeScale = Math.min(maxSafeScale, halfGap / a.radius);
+                }
+            }
+            maxSafeScale = Math.max(maxSafeScale, 0.5); // never shrink below minimum
+
+            // Grid search: radius scale 0.5× to 2.5× in steps of 0.1 (capped by overlap limit)
             for (int step = 5; step <= 25; step++) {
                 double scale = step / 10.0;
+                if (scale > maxSafeScale) break;
                 List<Spot> tempRefs = new ArrayList<>();
                 for (int i = 0; i < state.spots.size() && i < refBoxes.size(); i++) {
                     if (!refBoxes.get(i).isSelected()) continue;
