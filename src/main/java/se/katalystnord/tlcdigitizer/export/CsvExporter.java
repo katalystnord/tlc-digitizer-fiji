@@ -55,10 +55,28 @@ public final class CsvExporter {
             pw.println("# Source image: " + state.originalImage.getTitle());
         }
         pw.println("# Image inverted: " + state.invertImage);
-        pw.println("# Background method: " + (state.usedPolynomialBackground ? "polynomial (Option A)" : "Savitzky-Golay (Option B, degree " + state.sgDegree + ")"));
+        String bgMethod;
+        if (state.usedTopHatBackground) {
+            bgMethod = "white top-hat (Option C, SE radius " + state.topHatSeRadius + " px)";
+        } else if (state.usedPolynomialBackground) {
+            bgMethod = "polynomial (Option A)";
+        } else {
+            bgMethod = "Savitzky-Golay (Option B, degree " + state.sgDegree + ")";
+        }
+        pw.println("# Background method: " + bgMethod);
         pw.println("# Threshold factor: " + state.thresholdFactor);
         pw.println("# Origin Y fraction: " + state.originYFraction);
         pw.println("# Front Y fraction: " + state.frontYFraction);
+        if (state.corners != null && state.corners.length == 8) {
+            pw.println("# corner_tl_x: " + state.corners[0]);
+            pw.println("# corner_tl_y: " + state.corners[1]);
+            pw.println("# corner_tr_x: " + state.corners[2]);
+            pw.println("# corner_tr_y: " + state.corners[3]);
+            pw.println("# corner_br_x: " + state.corners[4]);
+            pw.println("# corner_br_y: " + state.corners[5]);
+            pw.println("# corner_bl_x: " + state.corners[6]);
+            pw.println("# corner_bl_y: " + state.corners[7]);
+        }
         if (state.corrected != null) {
             pw.println("# Corrected image size: " + state.corrected.getWidth() + "x" + state.corrected.getHeight());
         }

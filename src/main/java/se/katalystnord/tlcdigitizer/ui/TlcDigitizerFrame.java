@@ -613,28 +613,55 @@ public class TlcDigitizerFrame extends JFrame {
 
     class Step3Panel extends AbstractStepPanel {
         private JRadioButton polynomialBtn;
+        private JRadioButton topHatBtn;
         private JRadioButton sgBtn;
+        private JSpinner seRadiusSp;
         private JSpinner sgDegreeSp;
 
         Step3Panel() {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             add(instrPanel("Correct for uneven plate illumination.<br>" +
-                "<b>Quartic polynomial</b> fits a 2-D surface to the whole plate — " +
-                "best for most plates (TLCyzer method).<br>" +
+                "<b>Quartic polynomial</b> fits a 2-D surface to the whole plate (TLCyzer method).<br>" +
+                "<b>White top-hat</b> removes background by morphological opening — best for " +
+                "UV-fluorescence plates.<br>" +
                 "<b>Savitzky-Golay</b> estimates background locally per spot — better for " +
                 "non-uniform charring or sulphuric-acid stained plates."));
             add(Box.createVerticalStrut(14));
 
             polynomialBtn = new JRadioButton(
-                "<html><b>Quartic polynomial</b> &nbsp;<small style='color:gray'>(recommended)</small></html>",
-                true);
+                "<html><b>Quartic polynomial</b></html>", true);
+            topHatBtn = new JRadioButton(
+                "<html><b>White top-hat</b> &nbsp;<small style='color:gray'>(recommended for UV-fluorescence)</small></html>");
             sgBtn = new JRadioButton("<html><b>Savitzky-Golay</b> per-spot polynomial</html>");
             ButtonGroup grp = new ButtonGroup();
             grp.add(polynomialBtn);
+            grp.add(topHatBtn);
             grp.add(sgBtn);
             polynomialBtn.setAlignmentX(LEFT_ALIGNMENT);
+            topHatBtn.setAlignmentX(LEFT_ALIGNMENT);
             sgBtn.setAlignmentX(LEFT_ALIGNMENT);
             add(polynomialBtn);
+            add(Box.createVerticalStrut(6));
+            add(topHatBtn);
+
+            // Top-hat options panel — SE radius
+            JPanel topHatOptions = new JPanel();
+            topHatOptions.setLayout(new BoxLayout(topHatOptions, BoxLayout.Y_AXIS));
+            topHatOptions.setAlignmentX(LEFT_ALIGNMENT);
+            topHatOptions.setBorder(BorderFactory.createEmptyBorder(4, 22, 0, 0));
+
+            seRadiusSp = new JSpinner(new SpinnerNumberModel(0, 0, 500, 5));
+            ((JSpinner.DefaultEditor) seRadiusSp.getEditor()).getTextField().setColumns(4);
+            JPanel seRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            seRow.add(new JLabel("SE radius (px):"));
+            seRow.add(seRadiusSp);
+            seRow.add(new JLabel(
+                "<html><small style='color:gray'>(0 = auto: 1.5× median spot radius)</small></html>"));
+            seRow.setAlignmentX(LEFT_ALIGNMENT);
+            topHatOptions.add(seRow);
+            topHatOptions.setVisible(false);
+            add(topHatOptions);
+
             add(Box.createVerticalStrut(6));
             add(sgBtn);
 
@@ -664,6 +691,7 @@ public class TlcDigitizerFrame extends JFrame {
             sgOptions.setVisible(false);
             add(sgOptions);
 
+            topHatBtn.addChangeListener(e -> topHatOptions.setVisible(topHatBtn.isSelected()));
             sgBtn.addChangeListener(e -> sgOptions.setVisible(sgBtn.isSelected()));
         }
 
@@ -678,24 +706,61 @@ public class TlcDigitizerFrame extends JFrame {
         @Override
         boolean commit() {
             state.usedPolynomialBackground = polynomialBtn.isSelected();
+            state.usedTopHatBackground     = topHatBtn.isSelected();
             state.sgDegree = (Integer) sgDegreeSp.getValue();
             FloatProcessor src = (state.perspCorrected != null) ? state.perspCorrected : state.corrected;
+
             if (state.usedPolynomialBackground) {
                 IJ.showStatus("Fitting quartic background polynomial…");
                 state.corrected = BackgroundCorrection.fitAndSubtract(src);
                 IJ.showStatus("");
                 setDisplay(state.corrected.duplicate(),
                     "TLC Digitizer — Step 3 · Background corrected");
+                IJ.log("[Step 3] Background method: quartic polynomial");
+
+            } else if (state.usedTopHatBackground) {
+                int seInput = (Integer) seRadiusSp.getValue();
+                float seRadius;
+                if (seInput == 0) {
+                    // Auto: estimate SE radius from a quick polynomial detection pass
+                    IJ.showStatus("Estimating SE radius…");
+                    FloatProcessor polyEst = BackgroundCorrection.fitAndSubtract(src);
+                    float[] epx = (float[]) polyEst.getPixels();
+                    float emax = 0;
+                    for (float v : epx) if (v > emax) emax = v;
+                    if (emax > 0) {
+                        float sc = 255f / emax;
+                        for (int i = 0; i < epx.length; i++) epx[i] *= sc;
+                    }
+                    List<Spot> prelim = SpotDetector.detect(polyEst, 1.0f);
+                    float mR = prelim.isEmpty() ? 20f : medianRadiusOf(prelim);
+                    seRadius = Math.max(10f, 1.5f * mR);
+                    IJ.log("[Step 3] Top-hat SE radius (auto): " + seRadius + " px");
+                } else {
+                    seRadius = seInput;
+                }
+                state.topHatSeRadius = seRadius;
+                IJ.showStatus("Applying white top-hat…");
+                state.corrected = BackgroundCorrection.topHat(src, seRadius);
+                IJ.showStatus("");
+                setDisplay(state.corrected.duplicate(),
+                    "TLC Digitizer — Step 3 · Background (top-hat, SE=" + (int) seRadius + " px)");
+                IJ.log("[Step 3] Background method: white top-hat (SE radius " + seRadius + " px)");
+
             } else {
                 state.corrected = src;
                 setDisplay(state.corrected.duplicate(),
                     "TLC Digitizer — Step 3 · Background (SG deferred to Step 5)");
+                IJ.log("[Step 3] Background method: Savitzky-Golay (degree " + state.sgDegree + ")");
             }
-            IJ.log("[Step 3] Background method: "
-                + (state.usedPolynomialBackground
-                    ? "quartic polynomial"
-                    : "Savitzky-Golay (degree " + state.sgDegree + ")"));
             return true;
+        }
+
+        private float medianRadiusOf(List<Spot> spots) {
+            float[] radii = new float[spots.size()];
+            for (int i = 0; i < spots.size(); i++) radii[i] = spots.get(i).radius;
+            java.util.Arrays.sort(radii);
+            return radii[spots.size() / 2];
         }
     }
 
@@ -933,11 +998,11 @@ public class TlcDigitizerFrame extends JFrame {
             overlay = new Overlay();
             displayWindow.setOverlay(overlay);
 
-            // When Savitzky-Golay is selected the image reaching Step 5 has no global background
-            // correction. Spot detection on an uneven-background image degrades quality, so we
-            // pre-flatten a detection-only copy here using the quartic polynomial. Integration
-            // still uses the raw state.corrected; only detection uses the flattened copy.
-            if (!state.usedPolynomialBackground) {
+            // S-G mode: no global background was applied, so pre-flatten a detection-only
+            // copy using the quartic polynomial. Integration uses raw state.corrected.
+            // Top-hat mode: state.corrected is already the top-hat result (spots as
+            // positive residuals) — use it directly for detection without re-flattening.
+            if (!state.usedPolynomialBackground && !state.usedTopHatBackground) {
                 IJ.showStatus("Pre-flattening for spot detection…");
                 flattenedForDetection = BackgroundCorrection.fitAndSubtract(state.corrected);
                 IJ.showStatus("");
@@ -1136,7 +1201,7 @@ public class TlcDigitizerFrame extends JFrame {
             RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
             SpotIntegrator.integrateAll(state.corrected, state.spots);
 
-            if (!state.usedPolynomialBackground) {
+            if (!state.usedPolynomialBackground && !state.usedTopHatBackground) {
                 IJ.showStatus("Applying per-spot polynomial background…");
                 BackgroundCorrection.applyPerSpotPolynomial(
                     state.spots, state.corrected, state.sgDegree);

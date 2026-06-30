@@ -142,13 +142,31 @@ public final class ValidationRunner {
 
         // ----- Stage 3: background correction --------------------------------
         FloatProcessor corrected;
-        if (fixture.usePolynomialBackground) {
-            corrected = BackgroundCorrection.fitAndSubtract(warped);
+        if (fixture.useTopHatBackground) {
+            // Estimate SE radius via a quick polynomial pass + detection.
+            FloatProcessor polyEst = BackgroundCorrection.fitAndSubtract(warped);
+            float[] estPx = (float[]) polyEst.getPixels();
+            float estMax = 0;
+            for (float v : estPx) if (v > estMax) estMax = v;
+            if (estMax > 0) {
+                float sc = 255f / estMax;
+                for (int i = 0; i < estPx.length; i++) estPx[i] *= sc;
+            }
+            float estMedR = medianRadius(SpotDetector.detect(polyEst, (float) fixture.thresholdFactor));
+            float seRadius = fixture.topHatSeRadius > 0
+                    ? fixture.topHatSeRadius : Math.max(10f, 1.5f * estMedR);
+            corrected = BackgroundCorrection.topHat(warped, seRadius);
         } else {
-            // S-G correction is applied after integration (see below).
-            // Use a minimal polynomial pass so pixel values are non-negative.
+            // Polynomial pass for detection image; also used as corrected for Option A.
+            // Option B (S-G) defers per-spot correction to after integration.
             corrected = BackgroundCorrection.fitAndSubtract(warped);
         }
+
+        // For top-hat mode, integrate on the corrected (top-hat) image — the background
+        // is already removed and there is no polynomial over-subtraction to avoid.
+        // For polynomial / S-G modes, integrate on the raw warped image so that the
+        // polynomial over-subtraction at off-centre positions does not corrupt integrals.
+        FloatProcessor integrationBase = fixture.useTopHatBackground ? corrected : warped;
 
         int corrW = corrected.getWidth();
         int corrH = corrected.getHeight();
@@ -243,8 +261,8 @@ public final class ValidationRunner {
                 t.rfValue = orig.rfValue;
                 temp.add(t);
             }
-            SpotIntegrator.integrateAll(warped, temp);
-            BackgroundCorrection.applyPerSpotPolynomial(temp, warped, sgDeg);
+            SpotIntegrator.integrateAll(integrationBase, temp);
+            BackgroundCorrection.applyPerSpotPolynomial(temp, integrationBase, sgDeg);
             try {
                 CalibrationModel m = CalibrationModel.fit(temp, CalibrationModel.ModelType.LINEAR);
                 if (m.rSquared > bestR2) { bestR2 = m.rSquared; bestScale = scale; }
@@ -261,8 +279,8 @@ public final class ValidationRunner {
             scaled.rfValue = orig.rfValue;
             refSpots.set(k, scaled);
         }
-        SpotIntegrator.integrateAll(warped, refSpots);
-        BackgroundCorrection.applyPerSpotPolynomial(refSpots, warped, sgDeg);
+        SpotIntegrator.integrateAll(integrationBase, refSpots);
+        BackgroundCorrection.applyPerSpotPolynomial(refSpots, integrationBase, sgDeg);
         // (debug output removed)
 
         // ----- Stage 7: leave-one-out calibration ----------------------------

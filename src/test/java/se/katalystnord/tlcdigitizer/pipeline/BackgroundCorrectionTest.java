@@ -56,6 +56,40 @@ public class BackgroundCorrectionTest {
     }
 
     @Test
+    public void topHat_removesBackground_preservesSpot() {
+        // Image: smooth ramp background (0–100) with a single bright spot (+80) in the centre.
+        int w = 60, h = 60;
+        float[] pixels = new float[w * h];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                pixels[y * w + x] = x * (100f / w); // horizontal gradient background
+            }
+        }
+        // Inject a 5×5 bright spot at centre (30, 30)
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                pixels[(30 + dy) * w + (30 + dx)] += 80f;
+            }
+        }
+
+        FloatProcessor fp = new FloatProcessor(w, h, pixels, null);
+        FloatProcessor result = BackgroundCorrection.topHat(fp, 12f); // SE > spot, < image
+
+        float[] out = (float[]) result.getPixels();
+
+        // Background pixels far from the spot should be near zero
+        double bgMax = 0;
+        for (int x = 0; x < 10; x++) {
+            bgMax = Math.max(bgMax, out[5 * w + x]);
+        }
+        assertTrue("Background should be near zero after top-hat; got " + bgMax, bgMax < 10.0);
+
+        // Spot centre should have a positive residual
+        float spotPeak = out[30 * w + 30];
+        assertTrue("Spot should remain positive after top-hat; got " + spotPeak, spotPeak > 40f);
+    }
+
+    @Test
     public void fitCoefficients_returnsFifteenParameters() {
         int w = 20, h = 20;
         float[] pixels = new float[w * h];

@@ -59,10 +59,23 @@ public class ValidationFixture {
     /**
      * True (default) to use the quartic polynomial background correction (Method A).
      * False to use per-spot Savitzky-Golay correction (Method B).
+     * Ignored when {@link #useTopHatBackground} is true.
      */
     public boolean usePolynomialBackground = true;
 
-    /** Polynomial degree for Method B (per-spot S-G correction). Ignored for Method A. */
+    /**
+     * True to use the white top-hat morphological background correction (Method C).
+     * When true, overrides {@link #usePolynomialBackground}.
+     */
+    public boolean useTopHatBackground = false;
+
+    /**
+     * Structuring element radius for top-hat correction in corrected-image pixels.
+     * 0 (default) = auto: 1.5× median auto-detected spot radius.
+     */
+    public float topHatSeRadius = 0f;
+
+    /** Polynomial degree for Method B (per-spot S-G correction). Ignored for Method A or C. */
     public int sgDegree = 5;
 
     /**

@@ -1,5 +1,6 @@
 package se.katalystnord.tlcdigitizer.pipeline;
 
+import ij.plugin.filter.RankFilters;
 import ij.process.FloatProcessor;
 import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
 import se.katalystnord.tlcdigitizer.model.Spot;
@@ -124,6 +125,41 @@ public final class BackgroundCorrection {
             x3, x2 * y, x * y2, y3, // D3
             x4, x3 * y, x2 * y2, x * y3, y4  // D4
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // Method C: white top-hat morphological transform
+    // -------------------------------------------------------------------------
+
+    /**
+     * White top-hat transform: {@code original − morphological_opening(original, seRadius)}.
+     *
+     * <p>Opening with a disk SE of radius {@code seRadius} removes structures
+     * (spots) wider than the SE from the image; subtracting the opening from the
+     * original isolates bright blobs as positive residuals with near-zero background.
+     * Standard operator for "bright blobs on smooth background" — equivalent to
+     * fluorescence microscopy spot enhancement.
+     *
+     * <p>SE radius rule of thumb: 1.5× the median spot radius. Spots narrower than
+     * the SE are preserved; the background estimate is the morphological opening.
+     *
+     * @param fp       source image (not modified)
+     * @param seRadius disk structuring element radius in pixels (≥ 1)
+     * @return top-hat image: spots as positive residuals, background ≈ 0
+     */
+    public static FloatProcessor topHat(FloatProcessor fp, float seRadius) {
+        FloatProcessor opening = (FloatProcessor) fp.duplicate();
+        RankFilters rf = new RankFilters();
+        rf.rank(opening, seRadius, RankFilters.MIN); // erosion
+        rf.rank(opening, seRadius, RankFilters.MAX); // dilation → opening
+
+        float[] srcPx = (float[]) fp.getPixels();
+        float[] opnPx = (float[]) opening.getPixels();
+        float[] result = new float[srcPx.length];
+        for (int i = 0; i < result.length; i++) {
+            result[i] = Math.max(0f, srcPx[i] - opnPx[i]);
+        }
+        return new FloatProcessor(fp.getWidth(), fp.getHeight(), result, null);
     }
 
     // -------------------------------------------------------------------------

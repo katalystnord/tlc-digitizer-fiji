@@ -20,7 +20,8 @@
   "invertImage": true,
   "useGreenChannel": true,
   "usePolynomialBackground": false,
-  "_thresholdNote": "Interactive UI used S-G background + threshold 3.13. Runner uses polynomial background; 1.0 is the appropriate detection threshold for that path.",
+  "useTopHatBackground": true,
+  "_thresholdNote": "Interactive UI used S-G background. Runner uses white top-hat background; 1.0 is the appropriate detection threshold.",
   "thresholdFactor": 1.0,
 
   "_cornerNote": "Corners ROTATED for portrait output. Exact coordinates from plugin Step 2.",

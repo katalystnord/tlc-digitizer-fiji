@@ -61,6 +61,12 @@ public class AnalysisState {
     /** Whether background correction used the polynomial (A) or Savitzky-Golay (B) method. */
     public boolean usedPolynomialBackground = true;
 
+    /** Whether background correction used the white top-hat transform (C). */
+    public boolean usedTopHatBackground = false;
+
+    /** Structuring element radius used for top-hat correction (pixels; 0 = auto). */
+    public float topHatSeRadius = 0f;
+
     /** Polynomial degree for per-spot Savitzky-Golay correction (1–8). */
     public int sgDegree = 5;
 
