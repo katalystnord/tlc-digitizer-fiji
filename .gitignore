@@ -13,3 +13,6 @@ validation/**/*.tif
 validation/**/*.tiff
 validation/**/*.pdf
 validation/**/*.csv
+
+# Claude Code local session state — permissions/lock files, not project config
+.claude/
