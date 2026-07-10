@@ -5,11 +5,20 @@
     "SMX 100% standard: 5 mg/mL / 6 (dilution) × 2 µL spotting = 1.667 µg/spot.",
     "TMP 100% standard: 1 mg/mL / 6 × 2 µL = 0.333 µg/spot (second compound, higher Rf).",
     "Only the 5 SMX spots are encoded here.",
-    "Corner arrangement ROTATES the landscape image to portrait (origin=bottom, front=top).",
-    "Corrected image size observed from plugin run: 1512×2958.",
     "Lane order in portrait (left→right): 60%, 90%, 80%, 90%, 100%.",
-    "thresholdFactor, originYFraction, frontYFraction, and spot positions taken from",
-    "      exported CSV (2026-06-29 20:44). Calibration R²=0.9996.",
+    "REBUILT 2026-07-10: original fixture (2026-06-29) had hand-transcribed corners",
+    "      predating the CSV corner-export feature, which produced a scale-mismatched",
+    "      warp — the recorded xFraction/yFraction landed on blank plate background,",
+    "      well away from both the real SMX row and the higher-Rf TMP row that",
+    "      auto-detection picked up instead. Re-ran interactively with the current",
+    "      build (white top-hat, exact corners from CSV export). Auto-detection",
+    "      initially caught the SMX row plus one spurious extra blob (off-row);",
+    "      nudging the threshold from 1.0 to 1.05 dropped the spurious blob and",
+    "      left exactly the 5 real SMX spots.",
+    "Corners recorded by the plugin are in EXIF-rotated portrait display space;",
+    "      converted to landscape (px,py) -> (lx,ly) via lx=py, ly=(1949-1)-px.",
+    "      Verified: re-warping with the converted corners reproduces the exact",
+    "      1503x2963 corrected-image size reported by the interactive session.",
     "Plate image: 41598_2022_17527_MOESM4_ESM.jpg (4096×1949 px).",
     "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
   ],
@@ -21,49 +30,50 @@
   "useGreenChannel": true,
   "usePolynomialBackground": false,
   "useTopHatBackground": true,
-  "_thresholdNote": "Interactive UI used S-G background. Runner uses white top-hat background; 1.0 is the appropriate detection threshold.",
-  "thresholdFactor": 1.0,
+  "topHatSeRadius": 152.25,
+  "_thresholdNote": "Interactive UI: white top-hat, threshold 1.05 -> 5/5 SMX spots auto-detected (1.0 also caught one spurious off-row blob).",
+  "thresholdFactor": 1.05,
 
-  "_cornerNote": "Corners ROTATED for portrait output. Exact coordinates from plugin Step 2.",
-  "corners": [2747, 103, 2747, 1292, 769, 1292, 769, 103],
+  "_cornerNote": "Landscape-space corners, converted from portrait CSV export (see _notes).",
+  "corners": [1003.8333, 1607.8334, 990.5, 127.5, 3940.0, 126.0, 3967.1667, 1629.5],
 
-  "originYFraction": 0.86004055,
-  "frontYFraction": 0.1764706,
+  "originYFraction": 0.85960174,
+  "frontYFraction": 0.10934863,
 
-  "_spotNote": "xFraction/yFraction taken from CSV centroid_x_fraction/centroid_y_fraction (plugin run 2026-06-29).",
+  "_spotNote": "xFraction/yFraction taken from CSV centroid_x_fraction/centroid_y_fraction (plugin run 2026-07-10).",
   "referenceSpots": [
     {
       "_lane": "Spot 1 — 60% reference standard (1.000 µg/spot)",
-      "xFraction": 0.148919,
-      "yFraction": 0.435337,
+      "xFraction": 0.140059,
+      "yFraction": 0.432905,
       "knownConcentration": 1.000,
       "apiName": "sulfamethoxazole"
     },
     {
       "_lane": "Spot 2 — 90% sample (1.500 µg/spot expected)",
-      "xFraction": 0.316744,
-      "yFraction": 0.434713,
+      "xFraction": 0.313721,
+      "yFraction": 0.430545,
       "knownConcentration": 1.500,
       "apiName": "sulfamethoxazole"
     },
     {
       "_lane": "Spot 3 — 80% reference standard (1.333 µg/spot)",
-      "xFraction": 0.528130,
-      "yFraction": 0.433358,
+      "xFraction": 0.525808,
+      "yFraction": 0.430362,
       "knownConcentration": 1.333,
       "apiName": "sulfamethoxazole"
     },
     {
       "_lane": "Spot 4 — 90% sample (1.500 µg/spot expected)",
-      "xFraction": 0.711341,
-      "yFraction": 0.436307,
+      "xFraction": 0.707379,
+      "yFraction": 0.433018,
       "knownConcentration": 1.500,
       "apiName": "sulfamethoxazole"
     },
     {
       "_lane": "Spot 5 — 100% reference standard (1.667 µg/spot)",
-      "xFraction": 0.855928,
-      "yFraction": 0.436981,
+      "xFraction": 0.856114,
+      "yFraction": 0.432453,
       "knownConcentration": 1.667,
       "apiName": "sulfamethoxazole"
     }
