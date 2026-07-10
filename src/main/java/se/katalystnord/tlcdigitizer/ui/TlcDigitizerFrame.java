@@ -534,12 +534,30 @@ public class TlcDigitizerFrame extends JFrame {
             PointRoi roi = new PointRoi(
                 new float[]{state.corners[0], state.corners[2], state.corners[4], state.corners[6]},
                 new float[]{state.corners[1], state.corners[3], state.corners[5], state.corners[7]}, 4);
+            roi.setPointType(PointRoi.CIRCLE);
+            roi.setSize(4); // "Extra Large" — default marker is too small to see at typical zoom
+            roi.setStrokeColor(Color.RED);
             imp.setRoi(roi);
 
             Overlay ov = new Overlay();
             int imgW = (state.grayscale != null) ? state.grayscale.getWidth() : 1000;
             int cornerFontSize = Math.max(24, Math.min(120, imgW / 40));
             Font labelFont = new Font("SansSerif", Font.BOLD, cornerFontSize);
+
+            // Connect the four corners with edge lines so the crop quadrilateral is
+            // visually obvious at a glance, not just four independent handles.
+            float edgeWidth = Math.max(2f, imgW / 400f);
+            int[] order = {0, 1, 2, 3, 0}; // TL, TR, BR, BL, TL — closes the loop
+            for (int i = 0; i < 4; i++) {
+                int a = order[i], b = order[i + 1];
+                Line edge = new Line(
+                    state.corners[a * 2], state.corners[a * 2 + 1],
+                    state.corners[b * 2], state.corners[b * 2 + 1]);
+                edge.setStrokeColor(Color.RED);
+                edge.setStrokeWidth(edgeWidth);
+                ov.add(edge);
+            }
+
             String[] labels = {"TL", "TR", "BR", "BL"};
             int lx = (int)(cornerFontSize * 1.4);  // left-side offset (approx 2-char width)
             int ly = (int)(cornerFontSize * 1.1);  // vertical offset (approx 1 line height)
