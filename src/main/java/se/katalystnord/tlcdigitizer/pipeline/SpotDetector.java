@@ -129,10 +129,16 @@ public final class SpotDetector {
             float cx = (float) (sumX / sumV);
             float cy = (float) (sumY / sumV);
 
-            // Radius = average half-dimension (TLCyzer formula: (W + H) / 4).
-            // This matches the physical spot for circular spots and averages the
-            // two axes for ovals — unlike the half-diagonal formula previously
-            // used, which overestimated by ~41% for round spots.
+            // Radius = average half-dimension: (W + H) / 4.
+            // NOTE: despite an earlier comment here, this is NOT what TLCyzer's own
+            // Rust implementation does (rust/blob_detection/src/lib.rs uses the min
+            // distance from centroid to a bbox corner, ~= the half-diagonal for a
+            // symmetric spot — ~41% larger than this formula). Tested swapping to
+            // TLCyzer's actual formula on 2026-07-10: it made RSD worse on all three
+            // validation plates (MOESM2 4.71%->7.34%, MOESM3 16.29%->22.31%, MOESM4
+            // 6.88%->8.36%), so (W+H)/4 is kept — it performs better in our specific
+            // pipeline even though it isn't what TLCyzer does. Don't "fix" this again
+            // without re-testing against the validation fixtures.
             float r = (bboxW + bboxH) / 4f;
 
             spots.add(new Spot(spotId++, cx, cy, r, height));
