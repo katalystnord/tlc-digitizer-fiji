@@ -192,7 +192,8 @@ public final class ValidationRunner {
                 detectionImage = corrected;
             }
         }
-        List<Spot> detected = SpotDetector.detect(detectionImage, (float) fixture.thresholdFactor);
+        List<Spot> detected = SpotDetector.detect(detectionImage,
+                (float) fixture.thresholdFactor, fixture.shapeAwareDetection);
         // (debug output removed)
         float medR = medianRadius(detected);
 
@@ -244,9 +245,6 @@ public final class ValidationRunner {
         int sgDeg = fixture.sgDegree > 0 ? fixture.sgDegree : 3;
         sgDeg = Math.min(sgDeg, Math.max(1, refSpots.size() - 2));
 
-        float[] baseRadii = new float[refSpots.size()];
-        for (int k = 0; k < refSpots.size(); k++) baseRadii[k] = refSpots.get(k).radius;
-
         // No overlap cap here: the runner integrates with per-spot S-G correction which
         // tolerates mild overlap at large scales.  Overlap capping belongs in the
         // interactive UI (Step 6) where polynomial-mode has no per-spot correction.
@@ -258,8 +256,7 @@ public final class ValidationRunner {
             List<Spot> temp = new ArrayList<>();
             for (int k = 0; k < refSpots.size(); k++) {
                 Spot orig = refSpots.get(k);
-                Spot t = new Spot(orig.id, orig.centroidX, orig.centroidY,
-                        (float)(baseRadii[k] * scale), corrH);
+                Spot t = scaledCopy(orig, (float) scale, corrH);
                 t.isReference = true;
                 t.referenceConcentration = orig.referenceConcentration;
                 t.rfValue = orig.rfValue;
@@ -276,8 +273,7 @@ public final class ValidationRunner {
         // Rebuild refSpots with best scale permanently applied
         for (int k = 0; k < refSpots.size(); k++) {
             Spot orig = refSpots.get(k);
-            Spot scaled = new Spot(orig.id, orig.centroidX, orig.centroidY,
-                    (float)(baseRadii[k] * bestScale), corrH);
+            Spot scaled = scaledCopy(orig, (float) bestScale, corrH);
             scaled.isReference = true;
             scaled.referenceConcentration = orig.referenceConcentration;
             scaled.rfValue = orig.rfValue;
@@ -349,6 +345,19 @@ public final class ValidationRunner {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Returns a copy of {@code orig} at the given radius scale, for the radius-optimisation
+     * grid search. Shape-aware spots (see {@link Spot#hasMask()}) keep their mask and ignore
+     * {@code scale} — a scalar radius multiplier has no well-defined meaning against a
+     * watershed-derived mask, which already represents the true detected extent.
+     */
+    private static Spot scaledCopy(Spot orig, float scale, int corrH) {
+        if (orig.hasMask()) {
+            return orig.withId(orig.id);
+        }
+        return new Spot(orig.id, orig.centroidX, orig.centroidY, orig.radius * scale, corrH);
+    }
 
     private static float medianRadius(List<Spot> spots) {
         if (spots.isEmpty()) return 20f;

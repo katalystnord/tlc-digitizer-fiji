@@ -85,6 +85,14 @@ public class ValidationFixture {
     public double thresholdFactor = 1.0;
 
     /**
+     * False (default) = legacy fixed-radius circular detection.
+     * True = opt-in shape-aware detection (hysteresis linking + watershed peak
+     * separation, see {@code SpotDetector#detect(FloatProcessor, float, boolean)}).
+     * Mirrors the interactive UI's {@code AnalysisState.shapeAwareDetection} toggle.
+     */
+    public boolean shapeAwareDetection = false;
+
+    /**
      * Four plate corner pixel coordinates in the <em>original</em> image (before perspective warp):
      * {@code [tlX, tlY, trX, trY, brX, brY, blX, blY]}
      * where tl=top-left, tr=top-right, br=bottom-right, bl=bottom-left.
