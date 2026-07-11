@@ -90,4 +90,33 @@ public class SpotIntegratorTest {
         assertFalse(Double.isNaN(spot.integrationValue));
         assertTrue(spot.integrationValue > 0);
     }
+
+    @Test
+    public void integrate_maskedSpot_usesMaskNotCircle() {
+        // 10x10 image; an L-shaped mask (not expressible as a circle) with a known
+        // uniform value, positioned so the equal-area circular radius would clip a
+        // corner — proves integration follows the mask, not spot.radius.
+        int w = 10, h = 10;
+        float[] pixels = new float[w * h]; // zero-initialised background
+        // L-shape: row y=5 full width 0..5, plus column x=0 full height 0..5
+        boolean[] mask = new boolean[5 * 5]; // 5x5 bounding box at (0,0)
+        for (int i = 0; i < 5; i++) mask[4 * 5 + i] = true; // bottom row
+        for (int j = 0; j < 5; j++) mask[j * 5 + 0] = true; // left column
+        int maskPixelCount = 5 + 5 - 1; // corner counted once
+
+        for (int j = 0; j < 5; j++) {
+            for (int i = 0; i < 5; i++) {
+                if (mask[j * 5 + i]) pixels[(0 + j) * w + (0 + i)] = 40f;
+            }
+        }
+        FloatProcessor fp = new FloatProcessor(w, h, pixels, null);
+
+        Spot masked = new Spot(1, 2f, 2f, 3f, h, mask, 0, 0, 5, 5, 0f, 0f, 0f);
+        SpotIntegrator.integrate(fp, masked);
+
+        int cutoff = Math.max(1, (int) (maskPixelCount * SpotIntegrator.TOP_FRACTION));
+        double expected = cutoff * 40.0;
+        assertEquals("Masked integration should sum top-15% of the L-shape, not a circle",
+            expected, masked.integrationValue, 1e-6);
+    }
 }

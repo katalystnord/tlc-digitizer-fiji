@@ -1,8 +1,15 @@
 package se.katalystnord.tlcdigitizer.pipeline;
 
+import ij.gui.PolygonRoi;
+import ij.gui.Roi;
+import ij.gui.Wand;
+import ij.plugin.filter.MaximumFinder;
+import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
+import ij.process.ImageProcessor;
 import se.katalystnord.tlcdigitizer.model.Spot;
 
+import java.awt.Rectangle;
 import java.util.*;
 
 /**
@@ -19,6 +26,41 @@ import java.util.*;
  * adjust radius (drag) — handled separately in the UI layer.
  *
  * Source: Hauk et al. Scientific Reports 12, 13433 (2022).
+ *
+ * <h2>Shape-aware detection (beta, opt-in)</h2>
+ * The pipeline above assumes compact, roughly-circular spots. Real plates with
+ * overloaded/tailing lanes produce elongated streaks whose midsection commonly dims
+ * below the mean threshold, splitting one physical spot into two disconnected
+ * components (a false negative for the streak's true extent, and a false spot count).
+ * {@link #detect(FloatProcessor, float, boolean)} with {@code shapeAware = true} fixes
+ * this in two stages:
+ * <ol>
+ *   <li><b>Candidate region via hysteresis linking:</b> each legacy-valid seed component
+ *   is grown via a second, lower threshold (the same idea as Canny edge-linking) using
+ *   {@link Wand}, producing the seed's true connected pixel mask instead of a
+ *   fixed-radius circle. As a safety net against growing into an unrelated neighbouring
+ *   spot, growth is rejected (falling back to the legacy circular result for that seed)
+ *   if it grows implausibly large or reaches the image edge — see
+ *   {@link #MAX_GROWTH_AREA_MULTIPLE} and {@link #MAX_GROWTH_DIM_FRACTION}.</li>
+ *   <li><b>Peak separation via watershed:</b> real TLC lanes very commonly contain
+ *   multiple co-eluting compounds (e.g. a reaction being monitored over time), not one
+ *   spot per lane — so a candidate region merged by hysteresis linking is not
+ *   necessarily one compound. {@link MaximumFinder} (ImageJ's classical, non-ML local-maxima
+ *   + watershed algorithm — the same "Find Maxima → Segmented Particles" used for
+ *   splitting touching cells in microscopy) is run within the candidate region: a single
+ *   dominant peak stays one spot (correct for a genuinely smeared/tailing single
+ *   compound); multiple peaks are split at the watershed ridge line between them (correct
+ *   for resolved-but-touching co-eluting compounds), each becoming its own spot with its
+ *   own mask, centroid, and integration. {@link #NOISE_TOLERANCE_FRACTION} controls how
+ *   prominent a bump must be to count as a separate peak.</li>
+ * </ol>
+ * This is off by default; see CLAUDE.md's "Real-plate exploratory test" section for the
+ * real-plate case that motivated it, including the three-threshold experiment that showed
+ * hysteresis linking alone (without peak separation) cannot simultaneously do the right
+ * thing for a genuinely single tailing compound and a mixture of close-eluting compounds.
+ * The remaining hard case — peaks so close there is no watershed-detectable valley between
+ * them at all — is a genuine limitation of any purely geometric/intensity-based approach;
+ * that's the case the v1.5 roadmap's Trainable Weka Segmentation item is for.
  */
 public final class SpotDetector {
 
@@ -37,6 +79,75 @@ public final class SpotDetector {
      * 1 % of min(width, height) ≈ 15 px on a 1500 px image.
      */
     static final float EDGE_MARGIN_FRACTION = 0.01f;
+
+    /**
+     * Shape-aware mode only: the hysteresis link threshold sits this fraction of the
+     * way from the image mean up to the primary threshold (mean × multiplier). Lower
+     * = more permissive linking (more likely to bridge a dim streak, more likely to
+     * over-merge neighbours); 0.4 is a conservative starting point, not yet validated
+     * against a labelled dataset.
+     */
+    static final float LINK_FRACTION = 0.4f;
+
+    /**
+     * Shape-aware mode only: reject a grown region (fall back to the legacy circular
+     * spot for that seed) if its bounding-box area exceeds the original seed's
+     * bounding-box area by more than this multiple. Guards against hysteresis linking
+     * bridging into an unrelated neighbouring spot.
+     */
+    static final float MAX_GROWTH_AREA_MULTIPLE = 6f;
+
+    /**
+     * Shape-aware mode only: reject a grown region if its bounding box width or height
+     * exceeds this fraction of the corresponding image dimension.
+     */
+    static final float MAX_GROWTH_DIM_FRACTION = 0.35f;
+
+    /**
+     * Shape-aware mode only: {@link MaximumFinder} watershed peak-separation tolerance,
+     * as a fraction of the candidate region's own dynamic range above the link threshold
+     * ({@code (regionMax - linkThreshold) × NOISE_TOLERANCE_FRACTION}). Lower = more
+     * willing to call a small bump a separate peak (more sensitive to close-eluting
+     * compounds, more prone to splitting noise); 0.3 is a starting point, not yet
+     * validated against a labelled dataset.
+     *
+     * <p>This relative fraction alone is not sufficient: a small, faint candidate region
+     * has a small dynamic range by construction, so a fixed fraction of it can be smaller
+     * than the image's own pixel noise — see {@link #MIN_TOLERANCE_STDDEV_MULTIPLE}, which
+     * is combined with this one via {@code max()} to fix exactly that failure mode (found
+     * interactively on img_00451: a small faint spot was spuriously split into two on
+     * noise, at every threshold multiplier tried).
+     *
+     * <p>An earlier version of the floor was based on {@code primaryThreshold - mean}
+     * (i.e. {@code mean × (multiplier - 1)}) instead of pixel standard deviation. That
+     * formula is degenerate — it is exactly zero at {@code multiplier = 1.0}, the default,
+     * and stays weak at most other multipliers too, because a background-corrected
+     * image's {@code mean} is inherently small (background ≈ 0 after correction). Don't
+     * reintroduce a floor that scales with {@code mean × multiplier}.
+     */
+    static final float NOISE_TOLERANCE_FRACTION = 0.3f;
+
+    /**
+     * Shape-aware mode only: absolute floor for the watershed tolerance, as a multiple of
+     * the whole image's pixel standard deviation — independent of the threshold multiplier
+     * (see {@link #NOISE_TOLERANCE_FRACTION} for why that independence matters). Keeps
+     * small/faint candidate regions from being split on grain-level bumps that a relative
+     * fraction of their own (small) dynamic range wouldn't catch. 2.0 (two standard
+     * deviations) is a starting point, not yet validated against a labelled dataset.
+     */
+    static final float MIN_TOLERANCE_STDDEV_MULTIPLE = 2.0f;
+
+    /** Sentinel value written outside the candidate mask before watershed peak-finding,
+     * far enough below any real (background-corrected) pixel value that it's never a
+     * local maximum and never bridges two real peaks across the mask boundary. */
+    private static final float WATERSHED_SENTINEL = -1e6f;
+
+    /**
+     * Minimum pixel count for a watershed-split sub-region to be kept as its own spot.
+     * Raised from an initial 4 after interactive testing showed single-digit-pixel
+     * fragments slipping through as spurious spots even with a reasonable tolerance.
+     */
+    private static final int MIN_PEAK_PIXELS = 16;
 
     private SpotDetector() {}
 
@@ -59,13 +170,29 @@ public final class SpotDetector {
      * @return list of detected spots, sorted by Y centroid (top to bottom)
      */
     public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier) {
+        return detect(fp, thresholdMultiplier, false);
+    }
+
+    /**
+     * Runs the full detection pipeline using {@code mean × thresholdMultiplier} as the threshold,
+     * optionally with shape-aware hysteresis linking (see class javadoc).
+     *
+     * @param fp                  background-corrected FloatProcessor
+     * @param thresholdMultiplier multiplier applied to the image mean (must be > 0)
+     * @param shapeAware          if true, grow each seed component into its true connected
+     *                            shape via hysteresis linking instead of reporting a fixed
+     *                            circle; see class javadoc for the failure mode this fixes
+     * @return list of detected spots, sorted by Y centroid (top to bottom)
+     */
+    public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier, boolean shapeAware) {
         int width = fp.getWidth();
         int height = fp.getHeight();
         float[] pixels = (float[]) fp.getPixels();
 
         // 1. Threshold at mean × multiplier
         float mean = computeMean(pixels);
-        boolean[] binary = threshold(pixels, mean * Math.max(0.01f, thresholdMultiplier));
+        float primaryThreshold = mean * Math.max(0.01f, thresholdMultiplier);
+        boolean[] binary = threshold(pixels, primaryThreshold);
 
         // 2. Morphological opening (erosion then dilation with square SE)
         int maxDim = Math.max(width, height);
@@ -83,6 +210,16 @@ public final class SpotDetector {
         float sizeMin = maxDim * SIZE_MIN_FRACTION;
         float sizeMax = maxDim * SIZE_MAX_FRACTION;
         int edgeMargin = Math.max(2, (int)(Math.min(width, height) * EDGE_MARGIN_FRACTION));
+
+        // Shape-aware mode: tracks pixels already absorbed into a finalised grown spot,
+        // so that a streak's origin-dot and cap seeds (both legacy-valid on their own)
+        // collapse into one spot instead of being reported twice.
+        boolean[] claimed = shapeAware ? new boolean[width * height] : null;
+        float linkThreshold = mean + (primaryThreshold - mean) * LINK_FRACTION;
+        // Global pixel standard deviation — floors the watershed tolerance (see
+        // growAndSplitSeed) independently of the threshold multiplier. Only needed in
+        // shape-aware mode; computing it is an extra O(N) pass so skip it otherwise.
+        float noiseScale = shapeAware ? computeStdDev(pixels, mean) : 0f;
 
         for (Map.Entry<Integer, int[]> entry : boundingBoxes.entrySet()) {
             int label = entry.getKey();
@@ -112,8 +249,9 @@ public final class SpotDetector {
                 continue;
             }
 
-            // 5. Intensity-weighted centroid
+            // 5. Intensity-weighted centroid (of the legacy seed component)
             double sumX = 0, sumY = 0, sumV = 0;
+            int seedX = -1, seedY = -1;
             for (int y2 = bbox[1]; y2 <= bbox[3]; y2++) {
                 for (int x2 = bbox[0]; x2 <= bbox[2]; x2++) {
                     if (labels[y2 * width + x2] == label) {
@@ -121,6 +259,7 @@ public final class SpotDetector {
                         sumX += x2 * v;
                         sumY += y2 * v;
                         sumV += v;
+                        if (seedX < 0) { seedX = x2; seedY = y2; }
                     }
                 }
             }
@@ -141,7 +280,34 @@ public final class SpotDetector {
             // without re-testing against the validation fixtures.
             float r = (bboxW + bboxH) / 4f;
 
-            spots.add(new Spot(spotId++, cx, cy, r, height));
+            if (!shapeAware) {
+                spots.add(new Spot(spotId++, cx, cy, r, height));
+                continue;
+            }
+
+            if (claimed[seedY * width + seedX]) {
+                // Already absorbed into a previously-grown spot from another seed.
+                continue;
+            }
+
+            List<Spot> grown = growAndSplitSeed(fp, pixels, width, height, seedX, seedY,
+                linkThreshold, bboxW * bboxH, edgeMargin, noiseScale);
+            if (grown == null || grown.isEmpty()) {
+                // Growth rejected (too large / touches edge / degenerate outline) — legacy fallback.
+                spots.add(new Spot(spotId++, cx, cy, r, height));
+                continue;
+            }
+            for (Spot sub : grown) {
+                Spot finalSpot = sub.withId(spotId++);
+                spots.add(finalSpot);
+                for (int j = 0; j < finalSpot.maskH; j++) {
+                    for (int i = 0; i < finalSpot.maskW; i++) {
+                        if (finalSpot.mask[j * finalSpot.maskW + i]) {
+                            claimed[(finalSpot.maskY + j) * width + (finalSpot.maskX + i)] = true;
+                        }
+                    }
+                }
+            }
         }
 
         // Sort top-to-bottom then left-to-right
@@ -149,6 +315,157 @@ public final class SpotDetector {
                               .thenComparingDouble(s -> s.centroidX));
 
         return spots;
+    }
+
+    /**
+     * Grows a single seed via hysteresis linking to find its candidate region, then
+     * separates that region into one spot per intensity peak via watershed (see class
+     * javadoc). Returns {@code null} if growth should be rejected (too large relative
+     * to the seed, reaches the image edge, or the traced outline is degenerate) —
+     * caller falls back to the legacy circular spot in that case. Returned spots have
+     * placeholder id {@code -1}; caller assigns real ids.
+     */
+    private static List<Spot> growAndSplitSeed(FloatProcessor fp, float[] pixels, int width, int height,
+                                                int seedX, int seedY, float linkThreshold, float seedArea,
+                                                int edgeMargin, float noiseScale) {
+        Wand wand = new Wand(fp);
+        wand.autoOutline(seedX, seedY, linkThreshold, Double.MAX_VALUE, Wand.FOUR_CONNECTED);
+        if (wand.npoints < 3) return null;
+
+        PolygonRoi wandRoi = new PolygonRoi(wand.xpoints, wand.ypoints, wand.npoints, Roi.TRACED_ROI);
+        Rectangle b = wandRoi.getBounds();
+        if (b.width <= 0 || b.height <= 0) return null;
+
+        float grownArea = (float) b.width * b.height;
+        boolean tooBig = grownArea > seedArea * MAX_GROWTH_AREA_MULTIPLE
+                || b.width  > width  * MAX_GROWTH_DIM_FRACTION
+                || b.height > height * MAX_GROWTH_DIM_FRACTION;
+        boolean touchesEdge = b.x <= edgeMargin || b.y <= edgeMargin
+                || (b.x + b.width)  >= width  - edgeMargin
+                || (b.y + b.height) >= height - edgeMargin;
+        if (tooBig || touchesEdge) return null;
+
+        ImageProcessor maskIp = wandRoi.getMask();
+        boolean[] regionMask = new boolean[b.width * b.height];
+        float regionMax = -Float.MAX_VALUE;
+        int n = 0;
+        for (int j = 0; j < b.height; j++) {
+            for (int i = 0; i < b.width; i++) {
+                if (maskIp.getPixel(i, j) != 0) {
+                    regionMask[j * b.width + i] = true;
+                    float v = pixels[(b.y + j) * width + (b.x + i)];
+                    if (v > regionMax) regionMax = v;
+                    n++;
+                }
+            }
+        }
+        if (n == 0) return null;
+
+        // Peak separation: build a cropped copy with everything outside the candidate
+        // region forced to a sentinel far below any real signal, so MaximumFinder never
+        // treats background as a peak and watershed lines never leak outside the region.
+        FloatProcessor region = new FloatProcessor(b.width, b.height);
+        for (int j = 0; j < b.height; j++) {
+            for (int i = 0; i < b.width; i++) {
+                region.setf(i, j, regionMask[j * b.width + i]
+                    ? pixels[(b.y + j) * width + (b.x + i)]
+                    : WATERSHED_SENTINEL);
+            }
+        }
+        double tolerance = Math.max(
+            noiseScale * MIN_TOLERANCE_STDDEV_MULTIPLE,
+            (regionMax - linkThreshold) * NOISE_TOLERANCE_FRACTION);
+        tolerance = Math.max(1e-3, tolerance);
+        ByteProcessor segmented = new MaximumFinder()
+            .findMaxima(region, tolerance, MaximumFinder.SEGMENTED, false);
+
+        boolean[] segBinary = new boolean[b.width * b.height];
+        for (int idx = 0; idx < segBinary.length; idx++) {
+            segBinary[idx] = regionMask[idx] && segmented.get(idx) != 0;
+        }
+        int[] peakLabels = labelComponents(segBinary, b.width, b.height);
+
+        // Group pixels by peak label, keeping only sufficiently large peaks.
+        Map<Integer, List<Integer>> peakPixels = new LinkedHashMap<>();
+        for (int idx = 0; idx < peakLabels.length; idx++) {
+            int label = peakLabels[idx];
+            if (label == 0) continue;
+            peakPixels.computeIfAbsent(label, k -> new ArrayList<>()).add(idx);
+        }
+
+        List<Spot> result = new ArrayList<>();
+        for (List<Integer> idxs : peakPixels.values()) {
+            if (idxs.size() < MIN_PEAK_PIXELS) continue;
+            Spot s = buildSpotFromSubMask(pixels, width, b, idxs, height);
+            if (s != null) result.add(s);
+        }
+        return result;
+    }
+
+    /**
+     * Builds a {@link Spot} (mask, intensity-weighted centroid, best-fit ellipse) from a
+     * subset of pixels within a candidate region's bounding box, given as flat indices
+     * into a {@code b.width × b.height} local array. Extracts a tight bounding box for
+     * the sub-mask rather than reusing the full candidate region's box.
+     */
+    private static Spot buildSpotFromSubMask(float[] pixels, int width, Rectangle b,
+                                              List<Integer> localIdxs, int imageHeight) {
+        int minI = b.width, minJ = b.height, maxI = -1, maxJ = -1;
+        for (int idx : localIdxs) {
+            int i = idx % b.width, j = idx / b.width;
+            if (i < minI) minI = i;
+            if (j < minJ) minJ = j;
+            if (i > maxI) maxI = i;
+            if (j > maxJ) maxJ = j;
+        }
+        int subW = maxI - minI + 1, subH = maxJ - minJ + 1;
+        int subX = b.x + minI, subY = b.y + minJ;
+
+        boolean[] subMask = new boolean[subW * subH];
+        double sumX = 0, sumY = 0, sumV = 0;
+        int n = 0;
+        for (int idx : localIdxs) {
+            int i = idx % b.width, j = idx / b.width;
+            int si = i - minI, sj = j - minJ;
+            subMask[sj * subW + si] = true;
+            int gx = b.x + i, gy = b.y + j;
+            float v = pixels[gy * width + gx];
+            sumX += gx * v;
+            sumY += gy * v;
+            sumV += v;
+            n++;
+        }
+        if (sumV == 0 || n == 0) return null;
+
+        float gcx = (float) (sumX / sumV);
+        float gcy = (float) (sumY / sumV);
+
+        // Geometric (unweighted) second central moments of the mask, for the ellipse fit —
+        // a shape descriptor, deliberately unweighted by intensity so a dim streak tail
+        // isn't discounted relative to its bright cap.
+        double m20 = 0, m02 = 0, m11 = 0;
+        for (int idx : localIdxs) {
+            int i = idx % b.width, j = idx / b.width;
+            double dx = (b.x + i) - gcx;
+            double dy = (b.y + j) - gcy;
+            m20 += dx * dx;
+            m02 += dy * dy;
+            m11 += dx * dy;
+        }
+        m20 /= n;
+        m02 /= n;
+        m11 /= n;
+        double common = Math.sqrt(Math.max(0, ((m20 - m02) * (m20 - m02)) / 4.0 + m11 * m11));
+        double lambda1 = (m20 + m02) / 2.0 + common;
+        double lambda2 = Math.max(0, (m20 + m02) / 2.0 - common);
+        float ellipseMajor = (float) (2.0 * Math.sqrt(lambda1));
+        float ellipseMinor = (float) (2.0 * Math.sqrt(lambda2));
+        float ellipseAngleDeg = (float) Math.toDegrees(0.5 * Math.atan2(2 * m11, m20 - m02));
+        float equivRadius = (float) Math.sqrt(n / Math.PI);
+
+        return new Spot(-1, gcx, gcy, equivRadius, imageHeight,
+            subMask, subX, subY, subW, subH,
+            ellipseMajor, ellipseMinor, ellipseAngleDeg);
     }
 
     /**
@@ -291,6 +608,15 @@ public final class SpotDetector {
         double sum = 0;
         for (float v : pixels) sum += v;
         return (float) (sum / pixels.length);
+    }
+
+    static float computeStdDev(float[] pixels, float mean) {
+        double sumSq = 0;
+        for (float v : pixels) {
+            double d = v - mean;
+            sumSq += d * d;
+        }
+        return (float) Math.sqrt(sumSq / pixels.length);
     }
 
     static boolean[] threshold(float[] pixels, float threshold) {

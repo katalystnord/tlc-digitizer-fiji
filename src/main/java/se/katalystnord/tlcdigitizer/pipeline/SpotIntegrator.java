@@ -10,8 +10,10 @@ import java.util.List;
 /**
  * Stage 6: Spot integration.
  *
- * For each spot, collects pixel values within the spot's circular region,
- * sorts them in descending order, and sums the top 15%.
+ * For each spot, collects pixel values within the spot's region — a circular
+ * region for legacy spots, or the shape-aware mask (see {@link Spot#hasMask()})
+ * for spots produced by {@link SpotDetector}'s shape-aware mode — sorts them in
+ * descending order, and sums the top 15%.
  *
  * Integrating only the top 15% of pixels improves robustness to spot edge
  * noise and partial overlaps, as validated by the TLCyzer algorithm.
@@ -30,7 +32,9 @@ public final class SpotIntegrator {
      * {@link Spot#integrationValue}.
      */
     public static void integrate(FloatProcessor fp, Spot spot) {
-        spot.integrationValue = integrateSpot(fp, spot.centroidX, spot.centroidY, spot.radius);
+        spot.integrationValue = spot.hasMask()
+            ? integrateMask(fp, spot)
+            : integrateSpot(fp, spot.centroidX, spot.centroidY, spot.radius);
     }
 
     /**
@@ -75,6 +79,40 @@ public final class SpotIntegrator {
         }
 
         // Sort descending
+        Collections.sort(values, Collections.reverseOrder());
+
+        int cutoff = Math.max(1, (int) (values.size() * TOP_FRACTION));
+        double sum = 0.0;
+        for (int i = 0; i < cutoff; i++) {
+            sum += values.get(i);
+        }
+        return sum;
+    }
+
+    /**
+     * Returns the integration value for a shape-aware spot: collects pixel values
+     * within {@link Spot#mask}, sorts descending, and sums the top {@value #TOP_FRACTION}
+     * fraction — same robustness rule as {@link #integrateSpot}, just over the spot's
+     * true connected shape instead of a fixed circle.
+     */
+    static double integrateMask(FloatProcessor fp, Spot spot) {
+        int width = fp.getWidth();
+        float[] pixels = (float[]) fp.getPixels();
+
+        List<Float> values = new ArrayList<>();
+        for (int j = 0; j < spot.maskH; j++) {
+            for (int i = 0; i < spot.maskW; i++) {
+                if (spot.mask[j * spot.maskW + i]) {
+                    int gx = spot.maskX + i, gy = spot.maskY + j;
+                    values.add(pixels[gy * width + gx]);
+                }
+            }
+        }
+
+        if (values.isEmpty()) {
+            return 0.0;
+        }
+
         Collections.sort(values, Collections.reverseOrder());
 
         int cutoff = Math.max(1, (int) (values.size() * TOP_FRACTION));

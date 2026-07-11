@@ -65,6 +65,7 @@ public final class CsvExporter {
         }
         pw.println("# Background method: " + bgMethod);
         pw.println("# Threshold factor: " + state.thresholdFactor);
+        pw.println("# Shape-aware detection: " + state.shapeAwareDetection);
         pw.println("# Origin Y fraction: " + state.originYFraction);
         pw.println("# Front Y fraction: " + state.frontYFraction);
         if (state.corners != null && state.corners.length == 8) {

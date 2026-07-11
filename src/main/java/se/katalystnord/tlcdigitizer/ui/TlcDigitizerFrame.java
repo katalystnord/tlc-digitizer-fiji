@@ -2,11 +2,13 @@ package se.katalystnord.tlcdigitizer.ui;
 
 import ij.IJ;
 import ij.ImagePlus;
+import ij.gui.EllipseRoi;
 import ij.gui.ImageCanvas;
 import ij.gui.Line;
 import ij.gui.OvalRoi;
 import ij.gui.Overlay;
 import ij.gui.PointRoi;
+import ij.gui.Roi;
 import ij.gui.TextRoi;
 import ij.process.FloatPolygon;
 import ij.process.FloatProcessor;
@@ -934,6 +936,7 @@ public class TlcDigitizerFrame extends JFrame {
     class Step5Panel extends AbstractStepPanel {
         private JSlider slider;
         private JSpinner multSp;
+        private JCheckBox shapeAwareBox;
         private JLabel countLabel;
         private JLabel liveR2Label;
 
@@ -992,11 +995,22 @@ public class TlcDigitizerFrame extends JFrame {
             spinRow.add(multSp);
             spinRow.add(new JLabel("  (or drag slider)"));
 
+            shapeAwareBox = new JCheckBox(
+                "<html><body style='width:480px'><b>Shape-aware detection (beta)</b> — " +
+                "hysteresis-link and integrate each spot's true connected shape instead of " +
+                "a fixed circle " +
+                "<small style='color:gray'>(better for streaking/tailing spots; " +
+                "not yet validated against the reference plates)</small></body></html>");
+            shapeAwareBox.setAlignmentX(LEFT_ALIGNMENT);
+            shapeAwareBox.addActionListener(e -> detect());
+
             JPanel controls = new JPanel();
             controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
             controls.add(sliderRow);
             controls.add(Box.createVerticalStrut(4));
             controls.add(spinRow);
+            controls.add(Box.createVerticalStrut(6));
+            controls.add(shapeAwareBox);
             controls.add(Box.createVerticalStrut(6));
             controls.add(countLabel);
 
@@ -1093,7 +1107,7 @@ public class TlcDigitizerFrame extends JFrame {
         private void detect() {
             float mult = slider.getValue() / 100.0f;
             spotHistory.clear();
-            spots = SpotDetector.detect(source(), mult);
+            spots = SpotDetector.detect(source(), mult, shapeAwareBox.isSelected());
             refreshOverlay();
             updateLiveR2();
         }
@@ -1115,8 +1129,9 @@ public class TlcDigitizerFrame extends JFrame {
             list.sort(Comparator.comparingDouble((Spot s) -> (double) s.centroidX)
                 .thenComparingDouble(s -> (double) s.centroidY));
             for (int i = 0; i < list.size(); i++) {
-                Spot o = list.get(i);
-                list.set(i, new Spot(i + 1, o.centroidX, o.centroidY, o.radius, imageHeight));
+                // withId() preserves mask/ellipse data — a plain 5-arg reconstruction here
+                // would silently discard shape-aware spots' mask on every overlay refresh.
+                list.set(i, list.get(i).withId(i + 1));
             }
         }
 
@@ -1134,7 +1149,6 @@ public class TlcDigitizerFrame extends JFrame {
                 return;
             }
 
-            int imgH = state.corrected.getHeight();
             List<Spot> matchedRefs = new ArrayList<>();
             for (Spot ref : prevRefs) {
                 Spot nearest = null;
@@ -1147,8 +1161,7 @@ public class TlcDigitizerFrame extends JFrame {
                 }
                 // Accept match only if the nearest detected spot is within 3× the reference radius
                 if (nearest != null && bestDist < ref.radius * 3.0) {
-                    Spot m = new Spot(ref.id, nearest.centroidX, nearest.centroidY,
-                        nearest.radius, imgH);
+                    Spot m = nearest.withId(ref.id);
                     m.isReference = true;
                     m.referenceConcentration = ref.referenceConcentration;
                     SpotIntegrator.integrate(state.corrected, m);
@@ -1210,6 +1223,7 @@ public class TlcDigitizerFrame extends JFrame {
             }
 
             state.thresholdFactor = slider.getValue() / 100.0;
+            state.shapeAwareDetection = shapeAwareBox.isSelected();
 
             // Spots are already sorted X-first and renumbered by refreshOverlay();
             // just copy the final list into state.
@@ -1530,14 +1544,13 @@ public class TlcDigitizerFrame extends JFrame {
         }
 
         private List<Spot> currentRefSpots() {
-            int imgH = (state.corrected != null) ? state.corrected.getHeight() : 1;
             List<Spot> refs = new ArrayList<>();
             for (int i = 0; i < state.spots.size() && i < refBoxes.size(); i++) {
                 if (!refBoxes.get(i).isSelected()) continue;
                 double conc = ((Number) concSpinners.get(i).getValue()).doubleValue();
                 if (conc <= 0) continue;
                 Spot s = state.spots.get(i);
-                Spot ref = new Spot(s.id, s.centroidX, s.centroidY, s.radius, imgH);
+                Spot ref = s.withId(s.id); // preserves mask/ellipse if s is shape-aware
                 ref.integrationValue = s.integrationValue;
                 ref.isReference = true;
                 ref.referenceConcentration = conc;
@@ -1586,8 +1599,12 @@ public class TlcDigitizerFrame extends JFrame {
                     double conc = ((Number) concSpinners.get(i).getValue()).doubleValue();
                     if (conc <= 0) continue;
                     Spot orig = state.spots.get(i);
-                    Spot temp = new Spot(orig.id, orig.centroidX, orig.centroidY,
-                        (float)(orig.radius * scale), imgH);
+                    // Radius scaling is meaningless for shape-aware spots — integration
+                    // sums the mask, not a circle — so leave those untouched by the search.
+                    Spot temp = orig.hasMask()
+                        ? orig.withId(orig.id)
+                        : new Spot(orig.id, orig.centroidX, orig.centroidY,
+                            (float)(orig.radius * scale), imgH);
                     temp.isReference = true;
                     temp.referenceConcentration = conc;
                     SpotIntegrator.integrate(state.corrected, temp);
@@ -1621,8 +1638,9 @@ public class TlcDigitizerFrame extends JFrame {
             final double scale = bestScale;
             List<Spot> newSpots = new ArrayList<>();
             for (Spot s : state.spots) {
-                Spot scaled = new Spot(s.id, s.centroidX, s.centroidY,
-                    (float)(s.radius * scale), imgH);
+                Spot scaled = s.hasMask()
+                    ? s.withId(s.id)
+                    : new Spot(s.id, s.centroidX, s.centroidY, (float)(s.radius * scale), imgH);
                 scaled.rfValue              = s.rfValue;
                 scaled.lane                 = s.lane;
                 scaled.isReference          = s.isReference;
@@ -1870,13 +1888,28 @@ public class TlcDigitizerFrame extends JFrame {
         for (Spot s : spots) {
             Color c = SPOT_COLORS[(s.id - 1) % SPOT_COLORS.length];
 
-            OvalRoi oval = new OvalRoi(
-                s.centroidX - s.radius, s.centroidY - s.radius,
-                s.radius * 2, s.radius * 2);
-            oval.setStrokeColor(c);
-            oval.setStrokeWidth(Math.max(1.5, s.radius * 0.06));
-            oval.setName("spot_" + s.id);
-            ov.add(oval);
+            Roi shapeRoi;
+            if (s.hasMask() && s.ellipseMajor > 0) {
+                // Shape-aware spot: draw the fitted ellipse (true orientation/elongation)
+                // rather than a plain circle, so the overlay honestly reflects what
+                // SpotIntegrator actually integrates (the mask, not a fixed radius).
+                double half = s.ellipseMajor / 2.0;
+                double rad = Math.toRadians(s.ellipseAngleDeg);
+                double x1 = s.centroidX - half * Math.cos(rad);
+                double y1 = s.centroidY - half * Math.sin(rad);
+                double x2 = s.centroidX + half * Math.cos(rad);
+                double y2 = s.centroidY + half * Math.sin(rad);
+                double aspect = s.ellipseMajor > 0 ? s.ellipseMinor / s.ellipseMajor : 1.0;
+                shapeRoi = new EllipseRoi(x1, y1, x2, y2, aspect);
+            } else {
+                shapeRoi = new OvalRoi(
+                    s.centroidX - s.radius, s.centroidY - s.radius,
+                    s.radius * 2, s.radius * 2);
+            }
+            shapeRoi.setStrokeColor(c);
+            shapeRoi.setStrokeWidth(Math.max(1.5, s.radius * 0.06));
+            shapeRoi.setName("spot_" + s.id);
+            ov.add(shapeRoi);
 
             // Font size scales with the spot so labels stay legible at any zoom / resolution.
             // Clamp: minimum readable at small zoom, maximum that fits inside large spots.

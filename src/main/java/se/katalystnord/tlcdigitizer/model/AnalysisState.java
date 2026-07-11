@@ -72,4 +72,10 @@ public class AnalysisState {
 
     /** Threshold multiplier used for spot detection (default: 1.0 = mean). */
     public double thresholdFactor = 1.0;
+
+    /**
+     * Whether spot detection used shape-aware hysteresis linking (beta, opt-in) instead
+     * of the legacy fixed-radius circle. See {@code SpotDetector} class javadoc.
+     */
+    public boolean shapeAwareDetection = false;
 }
