@@ -100,12 +100,12 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- ImageJ2 / SciJava — provided by Fiji at runtime -->
-    <dependency>
-      <groupId>net.imagej</groupId>
-      <artifactId>imagej</artifactId>
-      <scope>provided</scope>
-    </dependency>
+    <!-- Deliberately NOT a dependency: net.imagej:imagej (the full ImageJ2 aggregator).
+         Nothing in this codebase imports net.imagej.* — it's built entirely on classic ij.*.
+         Adding it back pulls in imagej-legacy/LegacyService, which breaks TrainableClassifier's
+         SciJava Context construction on this project's Java 21 + managed ij1-patcher combination
+         (see TrainableClassifier's class javadoc for the full story). If a real need for
+         net.imagej.* ever arises, re-test TrainableClassifier before assuming it still works. -->
 
     <!-- mpicbg perspective transforms — bundled with Fiji -->
     <dependency>
@@ -118,6 +118,14 @@
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-math3</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Labkit pixel classification (Random Forest, BSD-2-Clause) — bundled with Fiji.
+         Used for the opt-in trainable-classifier detection spike (see TrainableClassifier). -->
+    <dependency>
+      <groupId>sc.fiji</groupId>
+      <artifactId>labkit-pixel-classification</artifactId>
       <scope>provided</scope>
     </dependency>
 
