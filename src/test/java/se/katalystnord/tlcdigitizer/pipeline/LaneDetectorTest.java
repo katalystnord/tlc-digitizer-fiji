@@ -148,31 +148,69 @@ public class LaneDetectorTest {
     }
 
     // -------------------------------------------------------------------------
-    // selectCutoffs
+    // estimateLanePitch
     // -------------------------------------------------------------------------
 
-    @Test
-    public void selectCutoffs_singlePeak_maxIsWindowCeiling() {
-        // Rises to a single peak then falls, no secondary peak -> cutoff-max should be
-        // the last index (window ceiling), cutoff-min should be the local min before the peak.
-        float[] amp = {1, 1, 2, 5, 8, 5, 3, 2, 1, 1};
-        // local min before peak (index 4): scanning back from 4, index 1 or 0 is a plateau,
-        // first strict local min going backward is index... let's use a clear dip: adjust array
-        float[] amp2 = {5, 3, 1, 2, 8, 6, 4, 3, 2, 1};
-        int[] cutoffs = LaneDetector.selectCutoffs(amp2);
-        assertEquals("cutoff-min should be the dip before the peak", 2, cutoffs[0]);
-        assertEquals("cutoff-max should default to the window ceiling (no secondary peak)",
-                amp2.length - 1, cutoffs[1]);
+    private static float[] gaussianBumps(int width, float[] centers, float[] amps, float sigma) {
+        float[] p = new float[width];
+        for (int x = 0; x < width; x++) {
+            double v = 0;
+            for (int i = 0; i < centers.length; i++) {
+                double dx = x - centers[i];
+                v += amps[i] * Math.exp(-0.5 * dx * dx / (sigma * sigma));
+            }
+            p[x] = (float) v;
+        }
+        return p;
     }
 
     @Test
-    public void selectCutoffs_secondaryPeak_maxIsLocalMinAfterIt() {
-        // Primary peak at index 3, dips at index 6, secondary (smaller) peak at index 8,
-        // dips again (strictly, on both sides) at index 10 -> cutoff-max should land at
-        // index 10.
-        float[] amp = {1, 3, 6, 9, 6, 4, 2, 3, 5, 3, 1, 2};
-        int[] cutoffs = LaneDetector.selectCutoffs(amp);
-        assertEquals(10, cutoffs[1]);
+    public void estimateLanePitch_regularSpacing_findsExactPitch() {
+        float[] profile = gaussianBumps(420, new float[]{40, 110, 180, 250, 320, 390},
+                new float[]{100, 100, 100, 100, 100, 100}, 10f);
+        float pitch = LaneDetector.estimateLanePitch(profile, 20, 200);
+        assertEquals(70f, pitch, 0.01f);
+    }
+
+    @Test
+    public void estimateLanePitch_irregularSpacing_findsMeanPitch() {
+        float[] profile = gaussianBumps(620, new float[]{30, 140, 260, 360, 460, 580},
+                new float[]{90, 110, 100, 95, 105, 100}, 10f);
+        float pitch = LaneDetector.estimateLanePitch(profile, 20, 300);
+        assertEquals(110f, pitch, 0.01f);
+    }
+
+    @Test
+    public void estimateLanePitch_oneLaneMissing_stillFindsTruePitch() {
+        // The case motivating this whole class: a genuinely empty lane must not throw off
+        // pitch estimation for the remaining occupied ones.
+        float[] profile = gaussianBumps(420, new float[]{40, 110, 180, 250, 320, 390},
+                new float[]{100, 100, 100, 0, 100, 100}, 10f);
+        float pitch = LaneDetector.estimateLanePitch(profile, 20, 200);
+        assertEquals(70f, pitch, 0.01f);
+    }
+
+    @Test
+    public void estimateLanePitch_twoAdjacentLanesMissing_stillFindsTruePitch() {
+        float[] profile = gaussianBumps(420, new float[]{40, 110, 180, 250, 320, 390},
+                new float[]{100, 100, 0, 0, 100, 100}, 10f);
+        float pitch = LaneDetector.estimateLanePitch(profile, 20, 200);
+        assertEquals(70f, pitch, 0.01f);
+    }
+
+    @Test
+    public void estimateLanePitch_withoutSkippingFirstTrough_wouldPickNoiseScale() {
+        // Regression guard for the bug found while building this method: without skipping
+        // the first autocorrelation trough, the trivial near-zero-lag self-similarity value
+        // (reflecting bump width, not periodicity) wins once a lane goes missing weakens the
+        // true-pitch peak. minLag alone doesn't fix this if it's set below the bump width;
+        // the fix is skipping to the first trough regardless of minLag.
+        float[] profile = gaussianBumps(420, new float[]{40, 110, 180, 250, 320, 390},
+                new float[]{100, 100, 100, 0, 100, 100}, 10f);
+        // minLag=2 is deliberately far below the true pitch (70) and even below bump sigma
+        // (10), to prove the trough-skip — not minLag — is what avoids the noise-scale trap.
+        float pitch = LaneDetector.estimateLanePitch(profile, 2, 200);
+        assertEquals(70f, pitch, 0.01f);
     }
 
     // -------------------------------------------------------------------------

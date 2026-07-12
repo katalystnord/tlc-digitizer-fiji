@@ -78,4 +78,11 @@ public class AnalysisState {
      * of the legacy fixed-radius circle. See {@code SpotDetector} class javadoc.
      */
     public boolean shapeAwareDetection = false;
+
+    /**
+     * Whether spot-to-lane assignment used CWT-based lane-boundary detection (beta,
+     * opt-in) instead of {@code LaneAssigner}'s legacy centroid-gap clustering.
+     * See {@code LaneDetector} class javadoc.
+     */
+    public boolean laneDetectionEnabled = false;
 }

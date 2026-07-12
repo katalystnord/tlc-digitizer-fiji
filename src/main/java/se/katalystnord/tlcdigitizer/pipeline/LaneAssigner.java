@@ -1,5 +1,6 @@
 package se.katalystnord.tlcdigitizer.pipeline;
 
+import se.katalystnord.tlcdigitizer.model.Lane;
 import se.katalystnord.tlcdigitizer.model.Spot;
 
 import java.util.ArrayList;
@@ -51,6 +52,40 @@ public final class LaneAssigner {
             byX.get(i).lane = lane;
             prevX = x;
         }
+    }
+
+    /**
+     * Assigns {@link Spot#lane} (1-indexed) using pre-detected lane boundaries
+     * ({@code LaneDetector}, opt-in beta) instead of centroid gap-clustering.
+     *
+     * <p>Unlike {@link #assignLanes}, this can place a spot into the correct lane even
+     * when a neighbouring lane is missing or unusually spaced, because boundaries come
+     * from the image's own column-intensity profile rather than from the detected spots.
+     *
+     * @param spots detected spots; {@link Spot#lane} is modified in place
+     * @param lanes lane boundaries from {@code LaneDetector#detect}, left to right
+     */
+    public static void assignLanesFromBoundaries(List<Spot> spots, List<Lane> lanes) {
+        if (spots.isEmpty() || lanes.isEmpty()) return;
+        for (Spot s : spots) {
+            s.lane = laneIndexFor(s.centroidX, lanes) + 1;
+        }
+    }
+
+    /** Index of the lane containing {@code x}, or the nearest lane by center if {@code x}
+     * falls outside every {@code [left, right)} range (boundary rounding, malformed input). */
+    private static int laneIndexFor(float x, List<Lane> lanes) {
+        for (int i = 0; i < lanes.size(); i++) {
+            Lane l = lanes.get(i);
+            if (x >= l.left && x < l.right) return i;
+        }
+        int nearest = 0;
+        float bestDist = Float.MAX_VALUE;
+        for (int i = 0; i < lanes.size(); i++) {
+            float d = Math.abs(x - lanes.get(i).center);
+            if (d < bestDist) { bestDist = d; nearest = i; }
+        }
+        return nearest;
     }
 
     /**

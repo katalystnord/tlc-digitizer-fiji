@@ -15,6 +15,7 @@ import ij.process.FloatProcessor;
 import se.katalystnord.tlcdigitizer.export.AnnotatedImageExporter;
 import se.katalystnord.tlcdigitizer.export.CsvExporter;
 import se.katalystnord.tlcdigitizer.model.AnalysisState;
+import se.katalystnord.tlcdigitizer.model.Lane;
 import se.katalystnord.tlcdigitizer.model.Spot;
 import se.katalystnord.tlcdigitizer.pipeline.*;
 
@@ -937,6 +938,7 @@ public class TlcDigitizerFrame extends JFrame {
         private JSlider slider;
         private JSpinner multSp;
         private JCheckBox shapeAwareBox;
+        private JCheckBox laneDetectionBox;
         private JLabel countLabel;
         private JLabel liveR2Label;
 
@@ -1004,6 +1006,14 @@ public class TlcDigitizerFrame extends JFrame {
             shapeAwareBox.setAlignmentX(LEFT_ALIGNMENT);
             shapeAwareBox.addActionListener(e -> detect());
 
+            laneDetectionBox = new JCheckBox(
+                "<html><body style='width:480px'><b>Lane detection (beta)</b> — " +
+                "assign spots to lanes using CWT-based lane-boundary detection instead of " +
+                "grouping by gaps between detected spots " +
+                "<small style='color:gray'>(can represent a genuinely empty lane; " +
+                "not yet validated against the reference plates)</small></body></html>");
+            laneDetectionBox.setAlignmentX(LEFT_ALIGNMENT);
+
             JPanel controls = new JPanel();
             controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
             controls.add(sliderRow);
@@ -1011,6 +1021,8 @@ public class TlcDigitizerFrame extends JFrame {
             controls.add(spinRow);
             controls.add(Box.createVerticalStrut(6));
             controls.add(shapeAwareBox);
+            controls.add(Box.createVerticalStrut(6));
+            controls.add(laneDetectionBox);
             controls.add(Box.createVerticalStrut(6));
             controls.add(countLabel);
 
@@ -1224,12 +1236,18 @@ public class TlcDigitizerFrame extends JFrame {
 
             state.thresholdFactor = slider.getValue() / 100.0;
             state.shapeAwareDetection = shapeAwareBox.isSelected();
+            state.laneDetectionEnabled = laneDetectionBox.isSelected();
 
             // Spots are already sorted X-first and renumbered by refreshOverlay();
             // just copy the final list into state.
             state.spots = new ArrayList<Spot>(spots);
 
-            LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
+            if (state.laneDetectionEnabled) {
+                List<Lane> lanes = LaneDetector.detect(state.corrected, state.originYFraction);
+                LaneAssigner.assignLanesFromBoundaries(state.spots, lanes);
+            } else {
+                LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
+            }
             RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
             SpotIntegrator.integrateAll(state.corrected, state.spots);
 

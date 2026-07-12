@@ -1,6 +1,7 @@
 package se.katalystnord.tlcdigitizer.pipeline;
 
 import org.junit.Test;
+import se.katalystnord.tlcdigitizer.model.Lane;
 import se.katalystnord.tlcdigitizer.model.Spot;
 
 import java.util.ArrayList;
@@ -121,5 +122,51 @@ public class LaneAssignerTest {
         List<Spot> oneLane = Arrays.asList(spot(50, 100, 10), spot(69, 100, 10));
         LaneAssigner.assignLanes(oneLane, 400);
         assertEquals(oneLane.get(0).lane, oneLane.get(1).lane);
+    }
+
+    // -------------------------------------------------------------------------
+    // assignLanesFromBoundaries (CWT lane-detection path)
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void fromBoundaries_spotsPlacedIntoContainingLane() {
+        List<Lane> lanes = Arrays.asList(
+            new Lane(0f, 100f),
+            new Lane(100f, 200f),
+            new Lane(200f, 300f)
+        );
+        List<Spot> spots = Arrays.asList(
+            spot(250, 100, 10),  // lane 3
+            spot(50,  100, 10),  // lane 1
+            spot(150, 100, 10)   // lane 2
+        );
+        LaneAssigner.assignLanesFromBoundaries(spots, lanes);
+
+        assertEquals(1, spots.get(1).lane);
+        assertEquals(2, spots.get(2).lane);
+        assertEquals(3, spots.get(0).lane);
+    }
+
+    @Test
+    public void fromBoundaries_emptyLaneStaysEmpty() {
+        // Middle lane has no spots at all — a case assignLanes() (gap-clustering on
+        // detected centroids) cannot represent, since it only ever sees the spots that exist.
+        List<Lane> lanes = Arrays.asList(
+            new Lane(0f, 100f),
+            new Lane(100f, 200f),
+            new Lane(200f, 300f)
+        );
+        List<Spot> spots = Arrays.asList(spot(50, 100, 10), spot(250, 100, 10));
+        LaneAssigner.assignLanesFromBoundaries(spots, lanes);
+
+        assertEquals(1, spots.get(0).lane);
+        assertEquals(3, spots.get(1).lane);
+    }
+
+    @Test
+    public void fromBoundaries_emptyInputs_noOp() {
+        LaneAssigner.assignLanesFromBoundaries(new ArrayList<>(), Arrays.asList(new Lane(0f, 100f)));
+        List<Spot> spots = Arrays.asList(spot(50, 100, 10));
+        LaneAssigner.assignLanesFromBoundaries(spots, new ArrayList<>()); // must not throw
     }
 }
