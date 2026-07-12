@@ -85,4 +85,12 @@ public class AnalysisState {
      * See {@code LaneDetector} class javadoc.
      */
     public boolean laneDetectionEnabled = false;
+
+    /**
+     * Whether spot detection thresholded a trained Labkit pixel-classification probability
+     * map (beta, opt-in) instead of raw corrected-image intensity. See
+     * {@code TrainableClassifier} class javadoc. The user-marked training regions themselves
+     * are not currently logged (see CLAUDE.md's Phase B write-up for this known gap).
+     */
+    public boolean labkitDetectionEnabled = false;
 }

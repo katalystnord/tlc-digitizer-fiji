@@ -218,10 +218,11 @@ public final class TrainableClassifier {
 
     /**
      * Ratio of the larger class's labeled-pixel count to the smaller's, or {@code NaN} if either
-     * class has zero labeled pixels. Exposed package-private for testing; see class javadoc for
-     * why this matters (a real, reproduced failure mode — not a hypothetical one).
+     * class has zero labeled pixels. Public so UI code can give the user live feedback on
+     * selection quality before training, not just after {@link #train} logs a warning; see class
+     * javadoc for why this matters (a real, reproduced failure mode — not a hypothetical one).
      */
-    static double imbalanceRatio(List<Rectangle> spotRegions, List<Rectangle> backgroundRegions) {
+    public static double imbalanceRatio(List<Rectangle> spotRegions, List<Rectangle> backgroundRegions) {
         long spotArea = area(spotRegions);
         long backgroundArea = area(backgroundRegions);
         if (spotArea == 0 || backgroundArea == 0) return Double.NaN;

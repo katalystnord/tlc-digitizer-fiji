@@ -937,10 +937,21 @@ public class TlcDigitizerFrame extends JFrame {
     class Step5Panel extends AbstractStepPanel {
         private JSlider slider;
         private JSpinner multSp;
-        private JCheckBox shapeAwareBox;
-        private JCheckBox laneDetectionBox;
+        /** Detection method is one mutually-exclusive choice (radio group), not independent
+         * toggles: these are alternative strategies for the same job, and letting them combine
+         * freely made the previous checkbox-based UI show no clear default and no clear
+         * relationship between the threshold slider and whichever method(s) happened to be
+         * checked (feedback from interactive testing, 2026-07-12). */
+        private JRadioButton legacyRadio;
+        private JRadioButton shapeAwareRadio;
+        private JRadioButton laneDetectionRadio;
+        private JRadioButton labkitRadio;
+        private JPanel labkitPanel;
+        private JLabel labkitStatusLabel;
+        private JButton labkitTrainBtn;
+        private JButton labkitMarkSpotBtn;
+        private JButton labkitMarkBgBtn;
         private JLabel countLabel;
-        private JLabel liveR2Label;
 
         private List<Spot> spots = new ArrayList<Spot>();
         private final List<List<Spot>> spotHistory = new ArrayList<List<Spot>>();
@@ -950,16 +961,21 @@ public class TlcDigitizerFrame extends JFrame {
         /** Pre-flattened image used for detection when Savitzky-Golay is selected. */
         private FloatProcessor flattenedForDetection;
 
+        /** User-marked example regions for the Labkit trainable-classifier mode (image-pixel
+         * coordinates on {@code state.corrected}), and the resulting trained probability map —
+         * null until "Train & Detect" is clicked. See {@code TrainableClassifier}. */
+        private final List<Rectangle> labkitSpotRegions = new ArrayList<>();
+        private final List<Rectangle> labkitBackgroundRegions = new ArrayList<>();
+        private FloatProcessor labkitProbabilityMap;
+
         Step5Panel() {
             setLayout(new BorderLayout(0, 8));
 
-            add(instrPanel("<b>Drag the slider</b> to auto-detect spots (numbered yellow circles).<br>" +
-                "<b>To add a missed spot:</b> left-click the centre of the spot on the image. " +
-                "A circle sized to the local bright region will appear automatically.<br>" +
-                "<b>To remove a false positive:</b> Ctrl+click anywhere inside its circle.<br>" +
-                "<b>Ctrl+Z</b> undoes the last manual add or remove.<br>" +
-                "<i>Tip: moving the slider resets all manual edits — " +
-                "finish slider tuning before making manual corrections.</i>"), BorderLayout.NORTH);
+            add(instrPanel("Pick a detection method below, then drag the slider to auto-detect " +
+                "spots. <b>Click</b> to add a missed spot, <b>Ctrl+click</b> a spot to remove " +
+                "it, <b>Ctrl+Z</b> to undo " +
+                "<span style='color:gray'>(unavailable while Advanced detection/Labkit is " +
+                "selected — see below)</span>."), BorderLayout.NORTH);
 
             // Slider 10–500 → multiplier 0.10–5.00
             slider = new JSlider(10, 500, 100);
@@ -987,57 +1003,143 @@ public class TlcDigitizerFrame extends JFrame {
                 detect();
             });
 
-            JPanel sliderRow = new JPanel(new BorderLayout(4, 0));
-            sliderRow.add(new JLabel("0.1×"), BorderLayout.WEST);
-            sliderRow.add(slider, BorderLayout.CENTER);
-            sliderRow.add(new JLabel("5×"),   BorderLayout.EAST);
+            // GridBagLayout, not BorderLayout: the multiplier spinner is taller than a plain
+            // label, and BorderLayout's default vertical alignment for WEST/EAST vs. a taller
+            // CENTER component split this into three visually separate lines instead of one row
+            // (confirmed happening in practice) -- GridBagLayout keeps every cell in the same
+            // row reliably regardless of each component's own preferred height.
+            JPanel sliderRow = new JPanel(new GridBagLayout());
+            GridBagConstraints gbc = new GridBagConstraints();
+            gbc.gridy = 0;
+            gbc.anchor = GridBagConstraints.WEST;
+            gbc.insets = new Insets(0, 0, 0, 6);
 
-            JPanel spinRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-            spinRow.add(new JLabel("Multiplier:"));
-            spinRow.add(multSp);
-            spinRow.add(new JLabel("  (or drag slider)"));
+            gbc.gridx = 0;
+            sliderRow.add(new JLabel("Multiplier:"), gbc);
+            gbc.gridx = 1;
+            sliderRow.add(multSp, gbc);
+            gbc.gridx = 2;
+            sliderRow.add(new JLabel("0.1×"), gbc);
+            gbc.gridx = 3;
+            gbc.weightx = 1;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            sliderRow.add(slider, gbc);
+            gbc.gridx = 4;
+            gbc.weightx = 0;
+            gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = new Insets(0, 0, 0, 0);
+            sliderRow.add(new JLabel("5×"), gbc);
 
-            shapeAwareBox = new JCheckBox(
+            legacyRadio = new JRadioButton(
+                "<html><body style='width:480px'><b>Legacy (mean threshold)</b> — " +
+                "threshold at image-mean intensity, integrate within a fixed circular radius " +
+                "<small style='color:gray'>(recommended — the only method validated against " +
+                "the reference plates)</small></body></html>");
+            shapeAwareRadio = new JRadioButton(
                 "<html><body style='width:480px'><b>Shape-aware detection (beta)</b> — " +
                 "hysteresis-link and integrate each spot's true connected shape instead of " +
                 "a fixed circle " +
                 "<small style='color:gray'>(better for streaking/tailing spots; " +
                 "not yet validated against the reference plates)</small></body></html>");
-            shapeAwareBox.setAlignmentX(LEFT_ALIGNMENT);
-            shapeAwareBox.addActionListener(e -> detect());
-
-            laneDetectionBox = new JCheckBox(
+            laneDetectionRadio = new JRadioButton(
                 "<html><body style='width:480px'><b>Lane detection (beta)</b> — " +
                 "assign spots to lanes using CWT-based lane-boundary detection instead of " +
                 "grouping by gaps between detected spots " +
                 "<small style='color:gray'>(can represent a genuinely empty lane; " +
                 "not yet validated against the reference plates)</small></body></html>");
-            laneDetectionBox.setAlignmentX(LEFT_ALIGNMENT);
+            labkitRadio = new JRadioButton(
+                "<html><body style='width:480px'><b>Advanced detection (Labkit, beta)</b> — " +
+                "train a pixel classifier from a few example regions instead of a single " +
+                "intensity threshold " +
+                "<small style='color:gray'>(better for faint spots and tailing lanes; " +
+                "not yet validated against the reference plates)</small></body></html>");
+
+            ButtonGroup methodGroup = new ButtonGroup();
+            methodGroup.add(legacyRadio);
+            methodGroup.add(shapeAwareRadio);
+            methodGroup.add(laneDetectionRadio);
+            methodGroup.add(labkitRadio);
+            legacyRadio.setSelected(true);
+
+            for (JRadioButton rb : new JRadioButton[]{legacyRadio, shapeAwareRadio, laneDetectionRadio, labkitRadio}) {
+                rb.setAlignmentX(LEFT_ALIGNMENT);
+                rb.addActionListener(e -> {
+                    labkitPanel.setVisible(labkitRadio.isSelected());
+                    if (labkitRadio.isSelected()) {
+                        // Hide the previous detection overlay while marking regions -- those
+                        // old numbered circles don't reflect anything about the Labkit workflow
+                        // and just clutter the image the user is trying to draw rectangles on.
+                        clearOverlayForLabkitMarking();
+                    } else {
+                        detect();
+                    }
+                });
+            }
+
+            labkitPanel = buildLabkitPanel();
+            labkitPanel.setAlignmentX(LEFT_ALIGNMENT);
+            labkitPanel.setVisible(false);
+
+            JLabel methodHeader = new JLabel("Detection method:");
+            methodHeader.setFont(methodHeader.getFont().deriveFont(Font.BOLD, 13f));
+            methodHeader.setAlignmentX(LEFT_ALIGNMENT);
+
+            JLabel sliderCaption = new JLabel(
+                "<html><body style='color:gray'><i>Threshold multiplier — applies to whichever " +
+                "method is selected above</i></body></html>");
+            sliderCaption.setAlignmentX(LEFT_ALIGNMENT);
 
             JPanel controls = new JPanel();
             controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
-            controls.add(sliderRow);
+            controls.add(methodHeader);
             controls.add(Box.createVerticalStrut(4));
-            controls.add(spinRow);
+            controls.add(legacyRadio);
             controls.add(Box.createVerticalStrut(6));
-            controls.add(shapeAwareBox);
+            controls.add(shapeAwareRadio);
             controls.add(Box.createVerticalStrut(6));
-            controls.add(laneDetectionBox);
+            controls.add(laneDetectionRadio);
             controls.add(Box.createVerticalStrut(6));
-            controls.add(countLabel);
+            controls.add(labkitRadio);
+            controls.add(labkitPanel);
 
-            liveR2Label = new JLabel(
-                "<html><body style='color:gray;font-style:italic'>" +
-                "R² — (complete Step 6 first to see live calibration quality)</body></html>");
-            liveR2Label.setFont(liveR2Label.getFont().deriveFont(12f));
-            controls.add(Box.createVerticalStrut(4));
-            controls.add(liveR2Label);
-            add(controls, BorderLayout.CENTER);
+            // The method-selection area (not the threshold section below -- see the SOUTH
+            // footer) is wrapped in a scroll pane: the wizard window's size is fixed at first
+            // pack() (see the Step 5 checkbox-width lesson elsewhere in this file's history) and
+            // won't grow to fit taller content. A single, full-height scroll pane here is a
+            // standard, immediately visible pattern if that's ever needed -- unlike a small
+            // scroll region wrapping just one sub-panel, which hid actual action buttons behind
+            // a scrollbar that wasn't obviously there (confirmed as a real problem).
+            JScrollPane controlsScroll = new JScrollPane(controls,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            controlsScroll.setBorder(BorderFactory.createEmptyBorder());
+            add(controlsScroll, BorderLayout.CENTER);
+
+            // Fixed SOUTH footer, never affected by scrolling above: the threshold slider
+            // applies to every detection method (it shouldn't be something a scrollbar could
+            // ever hide), and the spot count is always relevant regardless of which method's
+            // extra controls are currently showing.
+            JPanel footer = new JPanel();
+            footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
+            footer.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
+                BorderFactory.createEmptyBorder(10, 0, 0, 0)));
+            sliderCaption.setAlignmentX(LEFT_ALIGNMENT);
+            sliderRow.setAlignmentX(LEFT_ALIGNMENT);
+            footer.add(sliderCaption);
+            footer.add(sliderRow);
+            footer.add(Box.createVerticalStrut(6));
+            countLabel.setAlignmentX(LEFT_ALIGNMENT);
+            footer.add(countLabel);
+            add(footer, BorderLayout.SOUTH);
         }
 
         @Override
         void onEnter() {
             spotHistory.clear();
+            labkitSpotRegions.clear();
+            labkitBackgroundRegions.clear();
+            labkitProbabilityMap = null;
+            if (labkitStatusLabel != null) updateLabkitStatus();
             setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 5 · Spots");
             overlay = new Overlay();
             displayWindow.setOverlay(overlay);
@@ -1059,6 +1161,12 @@ public class TlcDigitizerFrame extends JFrame {
             if (canvas != null) {
                 canvasListener = new MouseAdapter() {
                     public void mouseClicked(MouseEvent e) {
+                        // While Advanced detection (Labkit) is active, clicks draw/adjust the
+                        // rectangle selection used for region marking instead -- manual
+                        // add/remove-spot would silently do nothing useful here (spots aren't
+                        // shown until Train & Detect runs) and was confusing when both were live
+                        // at once.
+                        if (labkitRadio.isSelected()) return;
                         ImageCanvas c = displayWindow.getCanvas();
                         if (c == null) return;
                         int ix = c.offScreenX(e.getX());
@@ -1109,7 +1217,16 @@ public class TlcDigitizerFrame extends JFrame {
             Toolkit.getDefaultToolkit().addAWTEventListener(
                     awtUndoListener, AWTEvent.KEY_EVENT_MASK);
 
-            detect();
+            // The method radios persist across Back/Next (this panel isn't recreated each
+            // visit), but labkitProbabilityMap was just reset above -- if Labkit was left
+            // selected from a previous visit, detect() would silently fall back to legacy
+            // thresholding while the UI still shows Labkit selected. Show the (now-empty)
+            // marking overlay instead, consistent with a fresh start.
+            if (labkitRadio.isSelected()) {
+                clearOverlayForLabkitMarking();
+            } else {
+                detect();
+            }
         }
 
         private FloatProcessor source() {
@@ -1119,9 +1236,279 @@ public class TlcDigitizerFrame extends JFrame {
         private void detect() {
             float mult = slider.getValue() / 100.0f;
             spotHistory.clear();
-            spots = SpotDetector.detect(source(), mult, shapeAwareBox.isSelected());
+            // Labkit's probability map, once trained, replaces the source purely for the
+            // threshold+connected-component step below -- integration in commit() always
+            // integrates state.corrected, so this can't corrupt integration values.
+            FloatProcessor detectionSource = (labkitRadio.isSelected() && labkitProbabilityMap != null)
+                    ? labkitProbabilityMap : source();
+            spots = SpotDetector.detect(detectionSource, mult, shapeAwareRadio.isSelected());
             refreshOverlay();
-            updateLiveR2();
+        }
+
+        /** Below this many marked regions per class, the status feedback nudges the user to
+         * mark more — not a hard requirement (training only requires 1+ of each), but a
+         * practical minimum for the classifier to generalize reasonably. */
+        private static final int LABKIT_RECOMMENDED_MIN_REGIONS = 3;
+
+        /** Builds the region-marking + train UI shown only when {@link #labkitRadio} is
+         * selected, added directly under it in the same flow as every other radio's own
+         * description (no separate scroll region — see {@link #Step5Panel()} for why a small
+         * nested scroll pane around just this panel was tried and abandoned: it hid the actual
+         * action buttons behind a scrollbar that wasn't obvious was there, which is a worse
+         * problem than the panel being a bit tall). */
+        private JPanel buildLabkitPanel() {
+            JPanel panel = new JPanel();
+            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+            panel.setBorder(BorderFactory.createEmptyBorder(4, 16, 4, 0));
+
+            labkitMarkSpotBtn = new JButton("Mark as spot");
+            labkitMarkSpotBtn.addActionListener(e -> markSelection(labkitSpotRegions));
+            labkitMarkBgBtn = new JButton("Mark as background");
+            labkitMarkBgBtn.addActionListener(e -> markSelection(labkitBackgroundRegions));
+            JButton clearBtn = new JButton("Clear");
+            clearBtn.addActionListener(e -> {
+                labkitSpotRegions.clear();
+                labkitBackgroundRegions.clear();
+                labkitProbabilityMap = null;
+                updateLabkitStatus();
+                refreshLabkitMarkingOverlay();
+            });
+            labkitTrainBtn = new JButton("Train & Detect");
+            labkitTrainBtn.setAlignmentX(LEFT_ALIGNMENT);
+            labkitTrainBtn.addActionListener(e -> trainLabkitClassifier());
+
+            // Row 1: the two "mark" actions (each button's own live counter, per David's
+            // "small counter next to each button" feedback, replaces the old separate red
+            // status-count text). Row 2: Clear + Train & Detect together, since they're both
+            // "do something with the accumulated regions" actions rather than "add a region."
+            JPanel markRow = new JPanel();
+            markRow.setLayout(new BoxLayout(markRow, BoxLayout.X_AXIS));
+            labkitMarkSpotBtn.setAlignmentX(LEFT_ALIGNMENT);
+            labkitMarkBgBtn.setAlignmentX(LEFT_ALIGNMENT);
+            markRow.add(labkitMarkSpotBtn);
+            markRow.add(Box.createHorizontalStrut(6));
+            markRow.add(labkitMarkBgBtn);
+            markRow.setAlignmentX(LEFT_ALIGNMENT);
+
+            JPanel actionRow = new JPanel();
+            actionRow.setLayout(new BoxLayout(actionRow, BoxLayout.X_AXIS));
+            clearBtn.setAlignmentX(LEFT_ALIGNMENT);
+            actionRow.add(clearBtn);
+            actionRow.add(Box.createHorizontalStrut(6));
+            actionRow.add(labkitTrainBtn);
+            actionRow.setAlignmentX(LEFT_ALIGNMENT);
+
+            JPanel buttonCol = new JPanel();
+            buttonCol.setLayout(new BoxLayout(buttonCol, BoxLayout.Y_AXIS));
+            buttonCol.add(markRow);
+            buttonCol.add(Box.createVerticalStrut(4));
+            buttonCol.add(actionRow);
+
+            // A plain wrapping JTextArea, not an HTML JLabel: this project has already hit the
+            // "HTML width:Npx isn't reliably honored" class of bug once (see the Step 5
+            // checkbox-width lesson elsewhere in this file's history), and it recurred here too.
+            // A JTextArea's wrapping is a real layout computation, not CSS Swing's HTML renderer
+            // may or may not honor.
+            JTextArea instr = new JTextArea(
+                "Drag a rectangle (Fiji's rectangle tool) over a spot or over background, "
+                    + "then click the matching button (" + LABKIT_RECOMMENDED_MIN_REGIONS
+                    + "+ of each recommended).");
+            instr.setLineWrap(true);
+            instr.setWrapStyleWord(true);
+            instr.setEditable(false);
+            instr.setFocusable(false);
+            instr.setOpaque(false);
+            instr.setFont(instr.getFont().deriveFont(Font.ITALIC));
+            instr.setForeground(Color.GRAY);
+            instr.setAlignmentY(Component.TOP_ALIGNMENT);
+            instr.setMaximumSize(new Dimension(280, 80));
+            instr.setPreferredSize(new Dimension(280, 60));
+
+            JPanel topRow = new JPanel();
+            topRow.setLayout(new BoxLayout(topRow, BoxLayout.X_AXIS));
+            buttonCol.setAlignmentY(Component.TOP_ALIGNMENT);
+            topRow.add(buttonCol);
+            topRow.add(Box.createHorizontalStrut(12));
+            topRow.add(instr);
+            topRow.setAlignmentX(LEFT_ALIGNMENT);
+            panel.add(topRow);
+
+            labkitStatusLabel = new JLabel(" ");
+            labkitStatusLabel.setAlignmentX(LEFT_ALIGNMENT);
+            panel.add(Box.createVerticalStrut(4));
+            panel.add(labkitStatusLabel);
+            updateLabkitStatus();
+
+            return panel;
+        }
+
+        /** Reads the current rectangular ROI on the display canvas (image-pixel coordinates)
+         * and records it under the given region list. */
+        private void markSelection(List<Rectangle> regions) {
+            ImagePlus imp = getDisplayWindow();
+            if (imp == null || imp.getRoi() == null) {
+                IJ.error("Step 5 — Advanced detection",
+                    "Drag a rectangle on the image first (Fiji's rectangle selection tool, "
+                        + "top-left square icon in the main Fiji toolbar window).");
+                return;
+            }
+            regions.add(imp.getRoi().getBounds());
+            imp.deleteRoi();
+            labkitProbabilityMap = null;  // stale once labels change
+            updateLabkitStatus();
+            refreshLabkitMarkingOverlay();
+        }
+
+        /** Updates each mark button's own live region count and the (only-when-relevant)
+         * imbalance/trained note below them. The counts used to be a separate always-visible
+         * red/orange/green status line, which read as alarming before the user had done
+         * anything at all -- a small counter directly on each button is calmer and more
+         * compact, and only genuinely noteworthy conditions (imbalance, trained) get a
+         * separate line at all now. */
+        private void updateLabkitStatus() {
+            int nSpot = labkitSpotRegions.size(), nBg = labkitBackgroundRegions.size();
+            if (labkitMarkSpotBtn != null) labkitMarkSpotBtn.setText("Mark as spot (" + nSpot + ")");
+            if (labkitMarkBgBtn != null) labkitMarkBgBtn.setText("Mark as background (" + nBg + ")");
+            if (labkitStatusLabel == null) return;
+
+            StringBuilder sb = new StringBuilder("<html><body>");
+            boolean any = false;
+            if (nSpot > 0 && nBg > 0) {
+                double ratio = TrainableClassifier.imbalanceRatio(labkitSpotRegions, labkitBackgroundRegions);
+                if (!Double.isNaN(ratio) && ratio > 20) {
+                    sb.append("<span style='color:#b8860b'>⚠ quite imbalanced in size ("
+                        + String.format("%.0fx", ratio) + ") — try marking more comparable-sized " +
+                        "regions</span>");
+                    any = true;
+                }
+            }
+            if (labkitProbabilityMap != null) {
+                if (any) sb.append("<br>");
+                sb.append("<span style='color:green'>✓ trained — showing classifier-based " +
+                    "detection below</span>");
+                any = true;
+            }
+            sb.append("</body></html>");
+            labkitStatusLabel.setText(any ? sb.toString() : " ");
+        }
+
+        private void trainLabkitClassifier() {
+            if (labkitSpotRegions.isEmpty() || labkitBackgroundRegions.isEmpty()) {
+                IJ.error("Step 5 — Advanced detection",
+                    "Mark at least one spot region and one background region before training.");
+                return;
+            }
+            // Training/prediction take several seconds and there's no way to show real
+            // progress (Labkit doesn't report incremental progress), so this runs off the EDT
+            // in a SwingWorker -- setting a wait cursor/status text and then blocking
+            // synchronously on the EDT (an earlier version of this method did that) never
+            // actually renders those changes, since Swing repaints are just queued events that
+            // can't run while the EDT is busy: the whole UI looks frozen with zero feedback for
+            // the entire duration, easy to mistake for "did nothing."
+            labkitTrainBtn.setEnabled(false);
+            labkitStatusLabel.setText("<html><i>Training… this can take several seconds.</i></html>");
+            setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            ImageCanvas canvas = getDisplayWindow() == null ? null : getDisplayWindow().getCanvas();
+            if (canvas != null) canvas.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+            IJ.showStatus("Training classifier…");
+
+            new SwingWorker<FloatProcessor, Void>() {
+                private Throwable failure;
+
+                @Override
+                protected FloatProcessor doInBackground() {
+                    try {
+                        TrainableClassifier classifier = TrainableClassifier.train(
+                            state.corrected, labkitSpotRegions, labkitBackgroundRegions);
+                        return classifier.predictSpotProbability(state.corrected);
+                    } catch (Throwable ex) {
+                        // Catches Throwable, not just Exception: a missing/incompatible
+                        // dependency at runtime (e.g. a class-version mismatch between this
+                        // plugin and Fiji's own bundled jars) surfaces as an Error
+                        // (NoSuchMethodError, NoClassDefFoundError, ...), not an Exception -- an
+                        // earlier version of this catch clause only caught Exception and let
+                        // such failures propagate silently (no dialog, easy to mistake for
+                        // "nothing happened").
+                        failure = ex;
+                        return null;
+                    }
+                }
+
+                @Override
+                protected void done() {
+                    IJ.showStatus("");
+                    setCursor(Cursor.getDefaultCursor());
+                    if (canvas != null) canvas.setCursor(Cursor.getDefaultCursor());
+                    labkitTrainBtn.setEnabled(true);
+
+                    if (failure != null) {
+                        IJ.error("Step 5 — Advanced detection",
+                            "Training failed: " + failure.getClass().getSimpleName()
+                                + (failure.getMessage() != null ? (": " + failure.getMessage()) : ""));
+                        labkitProbabilityMap = null;
+                        updateLabkitStatus();
+                        return;
+                    }
+                    try {
+                        labkitProbabilityMap = get();
+                    } catch (Exception ex) {
+                        // get() only rethrows if doInBackground threw AND failure wasn't set,
+                        // which can't happen given the catch above -- kept for correctness.
+                        labkitProbabilityMap = null;
+                    }
+                    updateLabkitStatus();
+                    detect();
+                }
+            }.execute();
+        }
+
+        /** Clears the spot-detection overlay when switching into Labkit marking mode, so old
+         * numbered circles from the previous (threshold-based) detection don't clutter the
+         * image, then draws whatever regions are already marked (see
+         * {@link #refreshLabkitMarkingOverlay}). Detection resumes, and the overlay is
+         * repopulated with detected spots, once Train & Detect runs (via {@link #detect}) or a
+         * different method is selected. */
+        private void clearOverlayForLabkitMarking() {
+            spots = new ArrayList<>();
+            // countLabel isn't updated by refreshOverlay() here (that only runs from detect()) --
+            // without this, it kept showing the stale count from whichever method was selected
+            // before switching to Labkit, which reads as "8 spots detected" even though nothing
+            // has been detected yet and no training has happened.
+            countLabel.setText(labkitProbabilityMap == null
+                ? "No spots detected yet — mark regions and train below"
+                : "0 spots detected");
+            refreshLabkitMarkingOverlay();
+        }
+
+        /** Draws every currently-marked Labkit training region as a persistent, labeled
+         * rectangle on the canvas (green for spot regions, orange for background) — without
+         * this, a marked rectangle disappeared the instant it was marked (the selection itself
+         * is cleared right after recording it, see {@link #markSelection}), leaving nothing for
+         * the user to visually remember what had already been marked. */
+        private void refreshLabkitMarkingOverlay() {
+            ImagePlus imp = getDisplayWindow();
+            if (imp == null) return;
+            overlay = new Overlay();
+            addLabeledRegionRois(overlay, labkitSpotRegions, "S", new Color(40, 180, 40));
+            addLabeledRegionRois(overlay, labkitBackgroundRegions, "B", new Color(230, 140, 30));
+            imp.setOverlay(overlay);
+        }
+
+        private void addLabeledRegionRois(Overlay ov, List<Rectangle> regions, String prefix, Color color) {
+            for (int i = 0; i < regions.size(); i++) {
+                Rectangle r = regions.get(i);
+                Roi roi = new Roi(r.x, r.y, r.width, r.height);
+                roi.setStrokeColor(color);
+                roi.setStrokeWidth(2f);
+                roi.setName(prefix + (i + 1));
+                ov.add(roi);
+
+                String label = prefix + (i + 1);
+                TextRoi text = new TextRoi(r.x + 2, r.y - 16, label,
+                    new Font("SansSerif", Font.BOLD, 14));
+                text.setStrokeColor(color);
+                ov.add(text);
+            }
         }
 
         private void refreshOverlay() {
@@ -1144,63 +1531,6 @@ public class TlcDigitizerFrame extends JFrame {
                 // withId() preserves mask/ellipse data — a plain 5-arg reconstruction here
                 // would silently discard shape-aware spots' mask on every overlay refresh.
                 list.set(i, list.get(i).withId(i + 1));
-            }
-        }
-
-        private void updateLiveR2() {
-            // Only meaningful once the user has completed Step 6 at least once
-            List<Spot> prevRefs = state.spots.stream()
-                .filter(s -> s.isReference && !Double.isNaN(s.referenceConcentration)
-                          && s.referenceConcentration > 0)
-                .collect(Collectors.toList());
-
-            if (prevRefs.isEmpty() || state.corrected == null || spots.isEmpty()) {
-                liveR2Label.setText(
-                    "<html><body style='color:gray;font-style:italic'>" +
-                    "R² — (complete Step 6 first to see live calibration quality)</body></html>");
-                return;
-            }
-
-            List<Spot> matchedRefs = new ArrayList<>();
-            for (Spot ref : prevRefs) {
-                Spot nearest = null;
-                double bestDist = Double.MAX_VALUE;
-                for (Spot det : spots) {
-                    double dx = det.centroidX - ref.centroidX;
-                    double dy = det.centroidY - ref.centroidY;
-                    double d  = Math.sqrt(dx * dx + dy * dy);
-                    if (d < bestDist) { bestDist = d; nearest = det; }
-                }
-                // Accept match only if the nearest detected spot is within 3× the reference radius
-                if (nearest != null && bestDist < ref.radius * 3.0) {
-                    Spot m = nearest.withId(ref.id);
-                    m.isReference = true;
-                    m.referenceConcentration = ref.referenceConcentration;
-                    SpotIntegrator.integrate(state.corrected, m);
-                    matchedRefs.add(m);
-                }
-            }
-
-            if (matchedRefs.size() < 2) {
-                liveR2Label.setText(
-                    "<html><body style='color:gray;font-style:italic'>" +
-                    "R² — (reference spots not found at this threshold)</body></html>");
-                return;
-            }
-
-            try {
-                CalibrationModel cal = CalibrationModel.fit(matchedRefs,
-                    CalibrationModel.ModelType.LINEAR);
-                String col = cal.rSquared >= 0.99 ? "green" :
-                             cal.rSquared >= 0.90 ? "darkorange" : "red";
-                liveR2Label.setText(String.format(
-                    "<html><b style='color:%s'>R² = %.3f</b>" +
-                    "&nbsp;&nbsp;<span style='color:gray;font-size:10px'>" +
-                    "coarse · %d/%d refs matched · from Step 6</span></html>",
-                    col, cal.rSquared, matchedRefs.size(), prevRefs.size()));
-            } catch (Exception ex) {
-                liveR2Label.setText(
-                    "<html><body style='color:gray;font-style:italic'>R² — (error)</body></html>");
             }
         }
 
@@ -1235,8 +1565,9 @@ public class TlcDigitizerFrame extends JFrame {
             }
 
             state.thresholdFactor = slider.getValue() / 100.0;
-            state.shapeAwareDetection = shapeAwareBox.isSelected();
-            state.laneDetectionEnabled = laneDetectionBox.isSelected();
+            state.shapeAwareDetection = shapeAwareRadio.isSelected();
+            state.laneDetectionEnabled = laneDetectionRadio.isSelected();
+            state.labkitDetectionEnabled = labkitRadio.isSelected() && labkitProbabilityMap != null;
 
             // Spots are already sorted X-first and renumbered by refreshOverlay();
             // just copy the final list into state.

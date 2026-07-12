@@ -122,10 +122,64 @@
     </dependency>
 
     <!-- Labkit pixel classification (Random Forest, BSD-2-Clause) — bundled with Fiji.
-         Used for the opt-in trainable-classifier detection spike (see TrainableClassifier). -->
+         Used for the opt-in trainable-classifier detection spike (see TrainableClassifier).
+         Version pinned explicitly to what Fiji actually bundles (0.1.18), NOT pom-scijava's
+         managed 0.1.17: 0.1.17 was itself compiled against an older imglib2-roi than the
+         version Fiji bundles (see the imglib2-family overrides below), and mixing them throws
+         NoSuchMethodError inside Labkit's own code (LabelRegion.cursor()). The whole dependency
+         set must be the self-consistent versions Fiji actually ships, not just individually
+         "close enough." -->
     <dependency>
       <groupId>sc.fiji</groupId>
       <artifactId>labkit-pixel-classification</artifactId>
+      <version>0.1.18</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Explicit imglib2-family version overrides, pinned to what Fiji actually bundles
+         (checked directly against Fiji/jars/), NOT what pom-scijava:37.0.0 / labkit's own POM
+         would otherwise transitively resolve. Without these, Maven picked older imglib2
+         versions (e.g. imglib2 6.2.0 vs Fiji's 7.1.4) that don't match Fiji's runtime classpath
+         API-for-API: confirmed via a real crash, TrainableClassifier compiled fine against
+         6.2.0's Views.flatIterable(RandomAccessibleInterval), but Fiji's actual 7.1.4 jar threw
+         NoSuchMethodError for that exact signature at runtime. Build-time and Fiji's runtime
+         classpath must match for any shared library, not just be "close enough" by version
+         number. Re-check these against Fiji/jars/ if labkit-pixel-classification's own
+         version, or Fiji's own bundled versions, ever change. -->
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2</artifactId>
+      <version>7.1.4</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2-roi</artifactId>
+      <version>0.15.1</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2-realtransform</artifactId>
+      <version>4.0.4</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2-ij</artifactId>
+      <version>2.0.3</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2-cache</artifactId>
+      <version>1.0.0-beta-19</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.imglib2</groupId>
+      <artifactId>imglib2-algorithm</artifactId>
+      <version>0.18.0</version>
       <scope>provided</scope>
     </dependency>
 
