@@ -1341,8 +1341,13 @@ public class TlcDigitizerFrame extends JFrame {
             instr.setFont(instr.getFont().deriveFont(Font.ITALIC));
             instr.setForeground(Color.GRAY);
             instr.setAlignmentY(Component.TOP_ALIGNMENT);
-            instr.setMaximumSize(new Dimension(280, 80));
-            instr.setPreferredSize(new Dimension(280, 60));
+            // Fixed height, not computed: this text grew (2026-07-13, the equal-counts
+            // sentence) and the old fixed 60/80px clipped the last line -- bump generously
+            // rather than tightly, since this panel already sits inside a scroll pane (see
+            // "Whole-controls-panel scroll pane" elsewhere in this file's history), so extra
+            // height here just scrolls further, it can't hide anything below it.
+            instr.setMaximumSize(new Dimension(280, 130));
+            instr.setPreferredSize(new Dimension(280, 100));
 
             JPanel topRow = new JPanel();
             topRow.setLayout(new BoxLayout(topRow, BoxLayout.X_AXIS));
