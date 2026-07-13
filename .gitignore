@@ -29,6 +29,9 @@ validation/**/*.csv
 !validation/tlcyzer-paper/moesm2-labkit-digitized.csv
 !validation/tlcyzer-paper/moesm3-labkit-digitized.csv
 !validation/tlcyzer-paper/moesm4-labkit-digitized.csv
+!validation/tlcyzer-paper/moesm2-labkit-digitized.png
+!validation/tlcyzer-paper/moesm3-labkit-digitized.png
+!validation/tlcyzer-paper/moesm4-labkit-digitized.png
 
 # Claude Code local session state — permissions/lock files, not project config
 .claude/
