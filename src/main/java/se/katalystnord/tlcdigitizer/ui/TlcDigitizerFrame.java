@@ -1241,7 +1241,8 @@ public class TlcDigitizerFrame extends JFrame {
             // integrates state.corrected, so this can't corrupt integration values.
             FloatProcessor detectionSource = (labkitRadio.isSelected() && labkitProbabilityMap != null)
                     ? labkitProbabilityMap : source();
-            spots = SpotDetector.detect(detectionSource, mult, shapeAwareRadio.isSelected());
+            spots = SpotDetector.detect(detectionSource, mult, shapeAwareRadio.isSelected(),
+                    state.originYFraction, state.frontYFraction);
             refreshOverlay();
         }
 

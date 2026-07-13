@@ -81,6 +81,21 @@ public final class SpotDetector {
     static final float EDGE_MARGIN_FRACTION = 0.01f;
 
     /**
+     * Half-width of the excluded band drawn around each user-marked origin/solvent-front
+     * line (Step 4), as a fraction of image height. A component is rejected only if its
+     * bounding box's Y-centre falls within this band of either line — narrow and
+     * centre-based (not edge-overlap-based) so a real spot merely near the origin (e.g. a
+     * low-Rf compound, or the "origin dot" TLCyzer independently detected as its own real
+     * spot on a streaking lane — see CLAUDE.md's TLCyzer cross-validation writeup) isn't
+     * swept away along with it; only components sitting squarely on the hand-drawn line
+     * itself are excluded. Starting value, not yet validated against a labelled dataset.
+     * Fixes the false-positive spot on the solvent-front pencil line documented in
+     * CLAUDE.md's "Real-plate exploratory test" (a thickened/kinked point on the line
+     * crossed the mean threshold after quartic background correction).
+     */
+    static final float ANNOTATION_BAND_FRACTION = 0.01f;
+
+    /**
      * Shape-aware mode only: the hysteresis link threshold sits this fraction of the
      * way from the image mean up to the primary threshold (mean × multiplier). Lower
      * = more permissive linking (more likely to bridge a dim streak, more likely to
@@ -185,6 +200,28 @@ public final class SpotDetector {
      * @return list of detected spots, sorted by Y centroid (top to bottom)
      */
     public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier, boolean shapeAware) {
+        return detect(fp, thresholdMultiplier, shapeAware, Float.NaN, Float.NaN);
+    }
+
+    /**
+     * Runs the full detection pipeline using {@code mean × thresholdMultiplier} as the threshold,
+     * optionally with shape-aware hysteresis linking, and excluding a band around the
+     * user-marked origin/solvent-front lines (Step 4) from the search area — those are
+     * hand-drawn annotation, not TLC signal (see {@link #ANNOTATION_BAND_FRACTION}).
+     *
+     * @param fp                  background-corrected FloatProcessor
+     * @param thresholdMultiplier multiplier applied to the image mean (must be > 0)
+     * @param shapeAware          if true, grow each seed component into its true connected
+     *                            shape via hysteresis linking instead of reporting a fixed
+     *                            circle; see class javadoc for the failure mode this fixes
+     * @param originYFraction     origin line Y as a fraction of image height, or NaN to
+     *                            skip origin-band exclusion
+     * @param frontYFraction      solvent-front line Y as a fraction of image height, or
+     *                            NaN to skip front-band exclusion
+     * @return list of detected spots, sorted by Y centroid (top to bottom)
+     */
+    public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier, boolean shapeAware,
+                                     float originYFraction, float frontYFraction) {
         int width = fp.getWidth();
         int height = fp.getHeight();
         float[] pixels = (float[]) fp.getPixels();
@@ -246,6 +283,14 @@ public final class SpotDetector {
             if (bbox[0] <= edgeMargin || bbox[1] <= edgeMargin
                     || bbox[2] >= width  - edgeMargin
                     || bbox[3] >= height - edgeMargin) {
+                continue;
+            }
+
+            // Annotation-band filter: reject components centred on the hand-drawn
+            // origin/solvent-front line rather than on real TLC signal.
+            float bboxCenterYFraction = (bbox[1] + bbox[3]) / 2f / height;
+            if (inAnnotationBand(bboxCenterYFraction, originYFraction)
+                    || inAnnotationBand(bboxCenterYFraction, frontYFraction)) {
                 continue;
             }
 
@@ -603,6 +648,16 @@ public final class SpotDetector {
     // -------------------------------------------------------------------------
     // Algorithm steps (package-private for unit testing)
     // -------------------------------------------------------------------------
+
+    /**
+     * True if {@code yFraction} falls within {@link #ANNOTATION_BAND_FRACTION} of
+     * {@code lineYFraction}. {@code lineYFraction} of NaN (no line marked, or exclusion
+     * not requested) always returns false.
+     */
+    static boolean inAnnotationBand(float yFraction, float lineYFraction) {
+        if (Float.isNaN(lineYFraction)) return false;
+        return Math.abs(yFraction - lineYFraction) <= ANNOTATION_BAND_FRACTION;
+    }
 
     static float computeMean(float[] pixels) {
         double sum = 0;

@@ -128,6 +128,60 @@ public class SpotDetectorTest {
         assertTrue("Extreme threshold should eliminate all spots", spots.isEmpty());
     }
 
+    @Test
+    public void detect_fiveArgOverload_withNaNLines_matchesThreeArgOverload() {
+        // NaN origin/front fractions must be a no-op, so existing callers that don't pass
+        // them (2-/3-arg overloads) see unchanged behaviour.
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> threeArg = SpotDetector.detect(fp, 1.0f, false);
+        List<Spot> fiveArg = SpotDetector.detect(fp, 1.0f, false, Float.NaN, Float.NaN);
+        assertEquals(threeArg.size(), fiveArg.size());
+        assertEquals(1, fiveArg.size());
+    }
+
+    @Test
+    public void detect_spotOnOriginLine_isExcludedAsAnnotation() {
+        // A spot sitting squarely on the user-marked origin line (e.g. a pencil-line
+        // kink/thickening bright enough to cross the mean threshold — see CLAUDE.md's
+        // "Real-plate exploratory test") must be rejected as annotation, not signal.
+        float originYFraction = 0.5f;
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, Float.NaN);
+        assertTrue("Spot centred on the origin line should be excluded", spots.isEmpty());
+    }
+
+    @Test
+    public void detect_spotOnFrontLine_isExcludedAsAnnotation() {
+        float frontYFraction = 0.5f;
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, Float.NaN, frontYFraction);
+        assertTrue("Spot centred on the front line should be excluded", spots.isEmpty());
+    }
+
+    @Test
+    public void detect_spotAwayFromLines_isNotExcluded() {
+        // A real spot well clear of either annotation line must be unaffected.
+        float originYFraction = 0.9f, frontYFraction = 0.1f;
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, frontYFraction);
+        assertEquals("Spot far from both lines should be detected normally", 1, spots.size());
+    }
+
+    @Test
+    public void inAnnotationBand_nanLine_alwaysFalse() {
+        assertFalse(SpotDetector.inAnnotationBand(0.5f, Float.NaN));
+    }
+
+    @Test
+    public void inAnnotationBand_withinBand_true() {
+        assertTrue(SpotDetector.inAnnotationBand(0.505f, 0.5f));
+    }
+
+    @Test
+    public void inAnnotationBand_outsideBand_false() {
+        assertFalse(SpotDetector.inAnnotationBand(0.6f, 0.5f));
+    }
+
     /**
      * Builds a "dumbbell": two round blobs joined by a dim bridge whose intensity sits
      * strictly between the link threshold and the primary threshold at the given

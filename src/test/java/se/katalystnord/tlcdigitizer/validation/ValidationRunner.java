@@ -193,7 +193,8 @@ public final class ValidationRunner {
             }
         }
         List<Spot> detected = SpotDetector.detect(detectionImage,
-                (float) fixture.thresholdFactor, fixture.shapeAwareDetection);
+                (float) fixture.thresholdFactor, fixture.shapeAwareDetection,
+                fixture.originYFraction, fixture.frontYFraction);
         // (debug output removed)
         float medR = medianRadius(detected);
 
