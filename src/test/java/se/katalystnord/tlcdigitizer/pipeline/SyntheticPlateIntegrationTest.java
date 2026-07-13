@@ -2,6 +2,7 @@ package se.katalystnord.tlcdigitizer.pipeline;
 
 import ij.process.FloatProcessor;
 import org.junit.Test;
+import se.katalystnord.tlcdigitizer.model.Lane;
 import se.katalystnord.tlcdigitizer.model.Spot;
 
 import java.util.List;
@@ -146,5 +147,40 @@ public class SyntheticPlateIntegrationTest {
                 + "they don't happen to diverge on this specific geometry; the merge-then-"
                 + "split mechanism itself is covered by SpotDetectorTest's isolated unit tests",
                 2, legacy.size());
+    }
+
+    @Test
+    public void missingLane_amongRegularLanes_pitchStillRecoversAllSix() {
+        // LaneDetectorTest already proves (at the estimateLanePitch level, on hand-built 1D
+        // profile arrays) that a missing lane doesn't break pitch estimation -- enough
+        // same-pitch peak pairs remain among the occupied lanes. What's NOT covered anywhere
+        // else: the full detect() entry point, real 2D Gaussian spots (finite Y-extent, not
+        // a profile broadcast across every row like LaneDetectorTest's own bandedImage
+        // helper), through the REAL BackgroundCorrection pass first. This is the "known-good"
+        // boundary case end-to-end, not the genuinely non-periodic img_00451 failure mode
+        // documented as a deliberately-deferred limitation in CLAUDE.md -- that needs a
+        // different (non-periodicity-based) fix, not more test coverage of this same kind.
+        int w = 420, h = 300;
+        float originYFraction = 0.85f, frontYFraction = 0.15f;
+        float[] laneCenters = {40, 110, 180, 250, 320, 390}; // pitch 70, matches LaneDetectorTest's own regular-spacing case
+        int missingLaneIndex = 2; // center=180 -- no spot rendered there at all
+
+        SyntheticPlate plate = new SyntheticPlate(w, h, 10f);
+        for (int i = 0; i < laneCenters.length; i++) {
+            if (i == missingLaneIndex) continue;
+            plate.addSpot(laneCenters[i], 150f, 15f, 150f);
+        }
+        FloatProcessor warped = plate.addNoise(2f, 4).build();
+        FloatProcessor corrected = BackgroundCorrection.fitAndSubtract(warped);
+
+        List<Lane> lanes = LaneDetector.detect(corrected, originYFraction);
+
+        assertEquals("Pitch estimation should still recover all six lane positions "
+                + "(including the empty one) from the five occupied lanes' recurring spacing",
+                6, lanes.size());
+        for (int i = 0; i < laneCenters.length; i++) {
+            assertEquals("Lane " + i + " boundary should be near its true position",
+                    laneCenters[i], lanes.get(i).center, 25f);
+        }
     }
 }
