@@ -1,0 +1,38 @@
+# TLC Digitizer analysis export
+# Generated: 2026-07-13 15:54:28
+# Source image: TLC Digitizer — Step 6 · Calibrate
+# Image inverted: true
+# Background method: polynomial (Option A)
+# Threshold factor: 1.0
+# Shape-aware detection: false
+# Lane detection: false
+# Advanced detection (Labkit): true
+# Origin Y fraction: 0.85402185
+# Front Y fraction: 0.14995034
+# corner_tl_x: 200.5
+# corner_tl_y: 1016.5
+# corner_tr_x: 1682.5
+# corner_tr_y: 971.5
+# corner_br_x: 1724.5
+# corner_br_y: 3992.5
+# corner_bl_x: 248.5
+# corner_bl_y: 3995.5
+# Corrected image size: 1482x3021
+#
+# Calibration model: LINEAR
+# Calibration summary: LINEAR n=3 slope=0.000367387 intercept=45.6285 R²=0.5498 LOD=1.705e+05 LOQ=5.166e+05 RMSE=18.98 [Regression (ICH Q2(R1))]
+# R_squared: 0.5498079537729837
+# RMSE_concentration: 18.977714219094278
+# n_calibration_points: 3
+# slope: 3.673871873302067E-4
+# intercept: 45.62845674639156
+# LOD: 170464.45570983563
+# LOQ: 516558.95669647167
+# LOD_LOQ_convention: REGRESSION_ICH
+#
+spot_id,lane,rf_value,centroid_x_fraction,centroid_y_fraction,radius_fraction,integration_value,assigned_concentration,is_reference,reference_concentration
+1,1,0.753028,0.174479,0.323836,0.019861,47989.2,63.2591,true,60.0000
+2,2,0.747943,0.359877,0.327417,0.026068,120318,89.8319,false,0.00000
+3,3,0.746163,0.536163,0.328670,0.026150,124830,91.4896,true,80.0000
+4,4,0.745684,0.720433,0.329007,0.026150,126127,91.9661,false,0.00000
+5,5,0.748740,0.875177,0.326855,0.025571,107851,85.2514,true,100.000

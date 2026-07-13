@@ -14,5 +14,21 @@ validation/**/*.tiff
 validation/**/*.pdf
 validation/**/*.csv
 
+# Exceptions to the above:
+# - img_00451 is our own lab photo (not third-party copyrighted like the MOESM
+#   plates) and is the primary real-photo regression fixture
+#   (Img00451DetectionRegressionTest) -- small enough to track directly, kept
+#   so it can't be lost from a single machine.
+# - The three moesm*-labkit-digitized.csv exports are session-specific
+#   interactive-testing results (Labkit training isn't fully deterministic),
+#   not a regeneratable derived artifact like the legacy CSVs -- primary
+#   evidence for the LOO recovery/RSD findings documented in CLAUDE.md.
+!validation/img_00451/*.jpg
+!validation/img_00451/*.png
+!validation/img_00451/*.csv
+!validation/tlcyzer-paper/moesm2-labkit-digitized.csv
+!validation/tlcyzer-paper/moesm3-labkit-digitized.csv
+!validation/tlcyzer-paper/moesm4-labkit-digitized.csv
+
 # Claude Code local session state — permissions/lock files, not project config
 .claude/

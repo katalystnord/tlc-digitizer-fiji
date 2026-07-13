@@ -59,13 +59,16 @@ import static org.junit.Assert.*;
  * UV254 quenching plates (this plate's stated imaging mode) — if this test's positions
  * don't line up well, that assumption is the first thing to revisit.
  *
- * <p>Gated behind the real JPEG's presence on disk (same pattern as {@link ValidationTest}'s
- * {@code -Dvalidation.data.dir} gate) since the source photo lives outside the repository.
+ * <p>Unlike the MOESM plates, this photo is our own (not third-party copyrighted journal
+ * supplementary material), so it's small enough and safe to commit directly at
+ * {@code validation/img_00451/} rather than live outside the repository — still gated behind
+ * a file-presence {@code Assume} (same defensive pattern as {@link ValidationTest}'s
+ * {@code -Dvalidation.data.dir} gate) in case it's ever missing from a given checkout.
  */
 public class Img00451DetectionRegressionTest {
 
     private static final Path IMAGE_PATH =
-            Paths.get("/home/david/code/img_00451-e1488277851441.jpg");
+            Paths.get("validation/img_00451/img_00451-e1488277851441.jpg");
 
     // Exact parameters from img_00451-e1488277851441-digitized.csv (2026-07-12 interactive session).
     private static final float[] CORNERS = {
