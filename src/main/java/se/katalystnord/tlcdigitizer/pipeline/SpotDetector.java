@@ -80,20 +80,14 @@ public final class SpotDetector {
      */
     static final float EDGE_MARGIN_FRACTION = 0.01f;
 
-    /**
-     * Half-width of the excluded band drawn around each user-marked origin/solvent-front
-     * line (Step 4), as a fraction of image height. A component is rejected only if its
-     * bounding box's Y-centre falls within this band of either line — narrow and
-     * centre-based (not edge-overlap-based) so a real spot merely near the origin (e.g. a
-     * low-Rf compound, or the "origin dot" TLCyzer independently detected as its own real
-     * spot on a streaking lane — see CLAUDE.md's TLCyzer cross-validation writeup) isn't
-     * swept away along with it; only components sitting squarely on the hand-drawn line
-     * itself are excluded. Starting value, not yet validated against a labelled dataset.
-     * Fixes the false-positive spot on the solvent-front pencil line documented in
-     * CLAUDE.md's "Real-plate exploratory test" (a thickened/kinked point on the line
-     * crossed the mean threshold after quartic background correction).
-     */
-    static final float ANNOTATION_BAND_FRACTION = 0.01f;
+    // NOTE: an earlier version of this exclusion used a narrow band around each line
+    // instead of the whole-interval check below. That missed a real failure mode found
+    // during interactive testing: hand-drawn ruler/number annotations sitting in the
+    // margin *beyond* the origin line (between the origin and the physical plate/mat
+    // edge), not on the line itself — a band around just the line doesn't reach them.
+    // Real analyte spots only exist between Rf=0 (origin) and Rf=1 (front) by definition,
+    // so the correct exclusion is the whole region outside that interval, not a band
+    // around its two boundary lines. See {@link #outsideDevelopedRegion}.
 
     /**
      * Shape-aware mode only: the hysteresis link threshold sits this fraction of the
@@ -205,9 +199,10 @@ public final class SpotDetector {
 
     /**
      * Runs the full detection pipeline using {@code mean × thresholdMultiplier} as the threshold,
-     * optionally with shape-aware hysteresis linking, and excluding a band around the
-     * user-marked origin/solvent-front lines (Step 4) from the search area — those are
-     * hand-drawn annotation, not TLC signal (see {@link #ANNOTATION_BAND_FRACTION}).
+     * optionally with shape-aware hysteresis linking, and excluding everything outside the
+     * user-marked origin↔front interval (Step 4) from the search area — that region (the
+     * lines themselves, ruler/number markings, plate-holder margin beyond the origin) is
+     * annotation, not TLC signal (see {@link #outsideDevelopedRegion}).
      *
      * @param fp                  background-corrected FloatProcessor
      * @param thresholdMultiplier multiplier applied to the image mean (must be > 0)
@@ -215,9 +210,9 @@ public final class SpotDetector {
      *                            shape via hysteresis linking instead of reporting a fixed
      *                            circle; see class javadoc for the failure mode this fixes
      * @param originYFraction     origin line Y as a fraction of image height, or NaN to
-     *                            skip origin-band exclusion
+     *                            skip origin/front-region exclusion entirely
      * @param frontYFraction      solvent-front line Y as a fraction of image height, or
-     *                            NaN to skip front-band exclusion
+     *                            NaN to skip origin/front-region exclusion entirely
      * @return list of detected spots, sorted by Y centroid (top to bottom)
      */
     public static List<Spot> detect(FloatProcessor fp, float thresholdMultiplier, boolean shapeAware,
@@ -286,11 +281,13 @@ public final class SpotDetector {
                 continue;
             }
 
-            // Annotation-band filter: reject components centred on the hand-drawn
-            // origin/solvent-front line rather than on real TLC signal.
+            // Developed-region filter: reject components outside the origin↔front
+            // interval — annotation (the lines themselves, ruler/number markings, the
+            // plate-holder margin beyond the origin), not TLC signal. A spot lost here
+            // that a user actually wants (e.g. a genuine near-zero-Rf "origin dot") can
+            // always be added back manually via click-to-add.
             float bboxCenterYFraction = (bbox[1] + bbox[3]) / 2f / height;
-            if (inAnnotationBand(bboxCenterYFraction, originYFraction)
-                    || inAnnotationBand(bboxCenterYFraction, frontYFraction)) {
+            if (outsideDevelopedRegion(bboxCenterYFraction, originYFraction, frontYFraction)) {
                 continue;
             }
 
@@ -650,13 +647,19 @@ public final class SpotDetector {
     // -------------------------------------------------------------------------
 
     /**
-     * True if {@code yFraction} falls within {@link #ANNOTATION_BAND_FRACTION} of
-     * {@code lineYFraction}. {@code lineYFraction} of NaN (no line marked, or exclusion
-     * not requested) always returns false.
+     * True if {@code yFraction} lies outside the developed TLC region — at or beyond the
+     * origin line, or at or beyond the solvent-front line. Real analyte spots only exist
+     * strictly between Rf=0 (origin) and Rf=1 (front); components on or past either line
+     * are annotation (the hand-drawn line itself, ruler/number markings, plate-holder
+     * margin), not signal. Order-independent ({@code originYFraction}/{@code frontYFraction}
+     * may be given in either order). Returns {@code false} (no exclusion) if either
+     * fraction is NaN — used to make exclusion opt-in per caller (see {@link #detect}).
      */
-    static boolean inAnnotationBand(float yFraction, float lineYFraction) {
-        if (Float.isNaN(lineYFraction)) return false;
-        return Math.abs(yFraction - lineYFraction) <= ANNOTATION_BAND_FRACTION;
+    static boolean outsideDevelopedRegion(float yFraction, float originYFraction, float frontYFraction) {
+        if (Float.isNaN(originYFraction) || Float.isNaN(frontYFraction)) return false;
+        float lo = Math.min(originYFraction, frontYFraction);
+        float hi = Math.max(originYFraction, frontYFraction);
+        return yFraction <= lo || yFraction >= hi;
     }
 
     static float computeMean(float[] pixels) {

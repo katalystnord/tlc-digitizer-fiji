@@ -140,46 +140,76 @@ public class SpotDetectorTest {
     }
 
     @Test
-    public void detect_spotOnOriginLine_isExcludedAsAnnotation() {
-        // A spot sitting squarely on the user-marked origin line (e.g. a pencil-line
-        // kink/thickening bright enough to cross the mean threshold — see CLAUDE.md's
-        // "Real-plate exploratory test") must be rejected as annotation, not signal.
-        float originYFraction = 0.5f;
+    public void detect_spotAtOriginLine_isExcludedAsAnnotation() {
+        // A spot centred exactly on the user-marked origin line must be rejected as
+        // annotation, not signal.
+        float originYFraction = 0.5f, frontYFraction = 0.1f;
         FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
-        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, Float.NaN);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, frontYFraction);
         assertTrue("Spot centred on the origin line should be excluded", spots.isEmpty());
     }
 
     @Test
-    public void detect_spotOnFrontLine_isExcludedAsAnnotation() {
-        float frontYFraction = 0.5f;
+    public void detect_spotAtFrontLine_isExcludedAsAnnotation() {
+        float originYFraction = 0.9f, frontYFraction = 0.5f;
         FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
-        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, Float.NaN, frontYFraction);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, frontYFraction);
         assertTrue("Spot centred on the front line should be excluded", spots.isEmpty());
     }
 
     @Test
-    public void detect_spotAwayFromLines_isNotExcluded() {
-        // A real spot well clear of either annotation line must be unaffected.
+    public void detect_spotBeyondOriginLine_isExcludedAsAnnotation() {
+        // Reproduces the real img_00451 failure mode: hand-drawn ruler/number
+        // annotations sit in the margin *beyond* the origin line (between the origin and
+        // the plate/mat edge), not on the line itself — must still be excluded.
+        float originYFraction = 0.4f, frontYFraction = 0.1f;
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f); // spot at y=0.5, beyond origin (0.4)
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, frontYFraction);
+        assertTrue("Spot beyond the origin line should be excluded, not just on it", spots.isEmpty());
+    }
+
+    @Test
+    public void detect_spotBetweenLines_isNotExcluded() {
+        // A real spot strictly between origin and front must be unaffected.
         float originYFraction = 0.9f, frontYFraction = 0.1f;
         FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
         List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, originYFraction, frontYFraction);
-        assertEquals("Spot far from both lines should be detected normally", 1, spots.size());
+        assertEquals("Spot strictly between both lines should be detected normally", 1, spots.size());
     }
 
     @Test
-    public void inAnnotationBand_nanLine_alwaysFalse() {
-        assertFalse(SpotDetector.inAnnotationBand(0.5f, Float.NaN));
+    public void detect_onlyOneLineFractionSet_noExclusionApplied() {
+        // Exclusion requires both fractions (a direction can't be inferred from just one
+        // line) -- a partially-set pair is a no-op, same as fully NaN.
+        FloatProcessor fp = syntheticSpotImage(200, 200, 100, 100, 20, 50f, 200f);
+        List<Spot> spots = SpotDetector.detect(fp, 1.0f, false, 0.5f, Float.NaN);
+        assertEquals("Only one fraction set should not exclude anything", 1, spots.size());
     }
 
     @Test
-    public void inAnnotationBand_withinBand_true() {
-        assertTrue(SpotDetector.inAnnotationBand(0.505f, 0.5f));
+    public void outsideDevelopedRegion_eitherFractionNaN_alwaysFalse() {
+        assertFalse(SpotDetector.outsideDevelopedRegion(0.5f, Float.NaN, 0.1f));
+        assertFalse(SpotDetector.outsideDevelopedRegion(0.5f, 0.9f, Float.NaN));
     }
 
     @Test
-    public void inAnnotationBand_outsideBand_false() {
-        assertFalse(SpotDetector.inAnnotationBand(0.6f, 0.5f));
+    public void outsideDevelopedRegion_strictlyInside_false() {
+        assertFalse(SpotDetector.outsideDevelopedRegion(0.5f, 0.9f, 0.1f));
+    }
+
+    @Test
+    public void outsideDevelopedRegion_atOrBeyondEitherBoundary_true() {
+        assertTrue(SpotDetector.outsideDevelopedRegion(0.9f, 0.9f, 0.1f));  // on origin
+        assertTrue(SpotDetector.outsideDevelopedRegion(0.95f, 0.9f, 0.1f)); // beyond origin
+        assertTrue(SpotDetector.outsideDevelopedRegion(0.1f, 0.9f, 0.1f));  // on front
+        assertTrue(SpotDetector.outsideDevelopedRegion(0.05f, 0.9f, 0.1f)); // beyond front
+    }
+
+    @Test
+    public void outsideDevelopedRegion_orderIndependent() {
+        // Same result whether origin or front is numerically larger.
+        assertFalse(SpotDetector.outsideDevelopedRegion(0.5f, 0.1f, 0.9f));
+        assertTrue(SpotDetector.outsideDevelopedRegion(0.95f, 0.1f, 0.9f));
     }
 
     /**
