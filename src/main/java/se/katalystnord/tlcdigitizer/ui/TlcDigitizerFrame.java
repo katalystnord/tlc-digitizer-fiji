@@ -1251,6 +1251,23 @@ public class TlcDigitizerFrame extends JFrame {
          * practical minimum for the classifier to generalize reasonably. */
         private static final int LABKIT_RECOMMENDED_MIN_REGIONS = 3;
 
+        /** Every marked Labkit training region is normalized to a square of this size
+         * (fraction of {@code min(width, height)}), centered on wherever the user actually
+         * dragged, regardless of how large or small that drag was. Fixes a real failure mode
+         * found via interactive testing (2026-07-13, MOESM2 — the cleanest plate in the
+         * whole corpus): background boxes noticeably larger than the spot boxes (still well
+         * under the {@link TrainableClassifier#imbalanceRatio}'s 20:1 warning threshold)
+         * fully suppressed spot recall to zero, confirmed not a thresholding issue (0 real
+         * spots detected even at the minimum 0.1x multiplier) — i.e. below-the-warning-
+         * threshold imbalance can still break training completely. Rather than rely on users
+         * to eyeball comparably-sized boxes, this removes size as a variable entirely: every
+         * region (spot or background) has identical area, so class balance depends only on
+         * region *count*, which the existing per-button counters already make visible. This
+         * also matches the methodology of the original successful feasibility spike
+         * (~13 small, similarly-sized 16px boxes) rather than inventing a new convention.
+         */
+        private static final float LABKIT_REGION_SIZE_FRACTION = 0.02f;
+
         /** Builds the region-marking + train UI shown only when {@link #labkitRadio} is
          * selected, added directly under it in the same flow as every other radio's own
          * description (no separate scroll region — see {@link #Step5Panel()} for why a small
@@ -1311,9 +1328,11 @@ public class TlcDigitizerFrame extends JFrame {
             // A JTextArea's wrapping is a real layout computation, not CSS Swing's HTML renderer
             // may or may not honor.
             JTextArea instr = new JTextArea(
-                "Drag a rectangle (Fiji's rectangle tool) over a spot or over background, "
-                    + "then click the matching button (" + LABKIT_RECOMMENDED_MIN_REGIONS
-                    + "+ of each recommended).");
+                "Click roughly on a spot or on background (Fiji's rectangle tool -- any drag "
+                    + "size is fine, it's normalized to a fixed size automatically), then "
+                    + "click the matching button (" + LABKIT_RECOMMENDED_MIN_REGIONS
+                    + "+ of each recommended). Spot and background counts must match exactly "
+                    + "before training is enabled.");
             instr.setLineWrap(true);
             instr.setWrapStyleWord(true);
             instr.setEditable(false);
@@ -1343,17 +1362,27 @@ public class TlcDigitizerFrame extends JFrame {
             return panel;
         }
 
-        /** Reads the current rectangular ROI on the display canvas (image-pixel coordinates)
-         * and records it under the given region list. */
+        /** Reads the current rectangular ROI on the display canvas (image-pixel coordinates),
+         * normalizes it to a fixed-size square centered on the user's drag (see
+         * {@link #LABKIT_REGION_SIZE_FRACTION} for why), and records it under the given
+         * region list. */
         private void markSelection(List<Rectangle> regions) {
             ImagePlus imp = getDisplayWindow();
             if (imp == null || imp.getRoi() == null) {
                 IJ.error("Step 5 — Advanced detection",
-                    "Drag a rectangle on the image first (Fiji's rectangle selection tool, "
-                        + "top-left square icon in the main Fiji toolbar window).");
+                    "Click roughly on a spot or background area first (Fiji's rectangle "
+                        + "selection tool, top-left square icon in the main Fiji toolbar "
+                        + "window) — any drag size is fine, it's normalized automatically.");
                 return;
             }
-            regions.add(imp.getRoi().getBounds());
+            Rectangle dragged = imp.getRoi().getBounds();
+            int size = Math.max(10, Math.round(
+                LABKIT_REGION_SIZE_FRACTION * Math.min(imp.getWidth(), imp.getHeight())));
+            int cx = dragged.x + dragged.width / 2;
+            int cy = dragged.y + dragged.height / 2;
+            int x = Math.max(0, Math.min(imp.getWidth() - size, cx - size / 2));
+            int y = Math.max(0, Math.min(imp.getHeight() - size, cy - size / 2));
+            regions.add(new Rectangle(x, y, size, size));
             imp.deleteRoi();
             labkitProbabilityMap = null;  // stale once labels change
             updateLabkitStatus();
@@ -1361,27 +1390,35 @@ public class TlcDigitizerFrame extends JFrame {
         }
 
         /** Updates each mark button's own live region count and the (only-when-relevant)
-         * imbalance/trained note below them. The counts used to be a separate always-visible
-         * red/orange/green status line, which read as alarming before the user had done
-         * anything at all -- a small counter directly on each button is calmer and more
-         * compact, and only genuinely noteworthy conditions (imbalance, trained) get a
-         * separate line at all now. */
+         * mismatch/trained note below them, and enables {@link #labkitTrainBtn} only once
+         * counts match. The counts used to be a separate always-visible red/orange/green
+         * status line, which read as alarming before the user had done anything at all -- a
+         * small counter directly on each button is calmer and more compact, and only
+         * genuinely noteworthy conditions (count mismatch, trained) get a separate line.
+         *
+         * <p>Every marked region is now a fixed size (see {@link #LABKIT_REGION_SIZE_FRACTION}),
+         * so class balance depends purely on region <em>count</em> -- an area-ratio warning
+         * doesn't add anything beyond a plain count comparison anymore, and equal counts are
+         * enforced as a hard requirement (button disabled, not just a warning), not a
+         * recommendation: the 2026-07-13 MOESM2 interactive test found that even moderate
+         * imbalance (well under the old 20:1 area-ratio warning threshold) can silently zero
+         * out spot recall entirely on an otherwise clean plate. */
         private void updateLabkitStatus() {
             int nSpot = labkitSpotRegions.size(), nBg = labkitBackgroundRegions.size();
             if (labkitMarkSpotBtn != null) labkitMarkSpotBtn.setText("Mark as spot (" + nSpot + ")");
             if (labkitMarkBgBtn != null) labkitMarkBgBtn.setText("Mark as background (" + nBg + ")");
+
+            boolean countsMatch = nSpot == nBg;
+            if (labkitTrainBtn != null) labkitTrainBtn.setEnabled(countsMatch && nSpot > 0);
             if (labkitStatusLabel == null) return;
 
             StringBuilder sb = new StringBuilder("<html><body>");
             boolean any = false;
-            if (nSpot > 0 && nBg > 0) {
-                double ratio = TrainableClassifier.imbalanceRatio(labkitSpotRegions, labkitBackgroundRegions);
-                if (!Double.isNaN(ratio) && ratio > 20) {
-                    sb.append("<span style='color:#b8860b'>⚠ quite imbalanced in size ("
-                        + String.format("%.0fx", ratio) + ") — try marking more comparable-sized " +
-                        "regions</span>");
-                    any = true;
-                }
+            if (!countsMatch && (nSpot > 0 || nBg > 0)) {
+                sb.append("<span style='color:#b8860b'>⚠ spot/background counts must match "
+                    + "exactly before training (currently " + nSpot + " vs " + nBg
+                    + ") — mark more of whichever class is behind</span>");
+                any = true;
             }
             if (labkitProbabilityMap != null) {
                 if (any) sb.append("<br>");
@@ -1397,6 +1434,17 @@ public class TlcDigitizerFrame extends JFrame {
             if (labkitSpotRegions.isEmpty() || labkitBackgroundRegions.isEmpty()) {
                 IJ.error("Step 5 — Advanced detection",
                     "Mark at least one spot region and one background region before training.");
+                return;
+            }
+            // Defense in depth: updateLabkitStatus() already disables this button until
+            // counts match, but re-check here too in case that ever falls out of sync (see
+            // its javadoc for why exact counts are required, not just recommended).
+            if (labkitSpotRegions.size() != labkitBackgroundRegions.size()) {
+                IJ.error("Step 5 — Advanced detection",
+                    "Spot and background region counts must match exactly (currently "
+                        + labkitSpotRegions.size() + " spot vs " + labkitBackgroundRegions.size()
+                        + " background) -- mark or remove regions until they're equal, "
+                        + "then train again.");
                 return;
             }
             // Training/prediction take several seconds and there's no way to show real
