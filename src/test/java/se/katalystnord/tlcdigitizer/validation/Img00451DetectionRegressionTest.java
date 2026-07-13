@@ -96,18 +96,19 @@ public class Img00451DetectionRegressionTest {
      * regression guard against gross pipeline changes, not a precision check. */
     private static final float MATCH_TOLERANCE_FRACTION = 0.03f;
 
-    @BeforeClass
-    public static void configureHeadless() {
-        System.setProperty("java.awt.headless", "true");
-    }
+    /** Shared corrected/detection image, computed once (loading + top-hat on the full-size
+     * real photo takes ~90s) rather than per test method. Null if the source photo isn't
+     * present -- every {code @}Test method must {@code Assume.assumeTrue} on this before use. */
+    private static FloatProcessor corrected; // Stage 3 output, un-normalised -- what LaneDetector consumes
+    private static FloatProcessor detectionImage; // corrected, normalised to [0,255] -- what SpotDetector consumes
+    private static int width, height;
 
-    @Test
-    public void legacyDetection_stillFindsAllEightKnownSpots() throws Exception {
-        Assume.assumeTrue("Skipping: img_00451 source photo not present at " + IMAGE_PATH,
-                Files.isReadable(IMAGE_PATH));
+    @BeforeClass
+    public static void setUp() throws Exception {
+        System.setProperty("java.awt.headless", "true");
+        if (!Files.isReadable(IMAGE_PATH)) return; // tests below Assume-skip in this case
 
         BufferedImage bi = ImageIO.read(IMAGE_PATH.toFile());
-        assertNotNull("ImageIO could not read " + IMAGE_PATH, bi);
         ImagePlus imp = new ImagePlus("img_00451", bi);
 
         FloatProcessor gray = ImagePreparation.extractGreenChannel(imp);
@@ -116,7 +117,9 @@ public class Img00451DetectionRegressionTest {
             for (int i = 0; i < px.length; i++) px[i] = 255.0f - px[i];
         }
         FloatProcessor warped = PerspectiveCorrection.warpImage(gray, CORNERS);
-        FloatProcessor corrected = BackgroundCorrection.topHat(warped, TOP_HAT_SE_RADIUS);
+        corrected = BackgroundCorrection.topHat(warped, TOP_HAT_SE_RADIUS);
+        width = corrected.getWidth();
+        height = corrected.getHeight();
 
         float[] cpx = (float[]) corrected.getPixels();
         float cmax = 0;
@@ -124,17 +127,29 @@ public class Img00451DetectionRegressionTest {
         float[] norm = new float[cpx.length];
         float scale = cmax > 0 ? 255f / cmax : 1f;
         for (int i = 0; i < cpx.length; i++) norm[i] = cpx[i] * scale;
-        FloatProcessor detectionImage =
-                new FloatProcessor(corrected.getWidth(), corrected.getHeight(), norm, null);
+        detectionImage = new FloatProcessor(width, height, norm, null);
+    }
 
-        List<Spot> detected = SpotDetector.detect(detectionImage, THRESHOLD_FACTOR, false,
-                ORIGIN_Y_FRACTION, FRONT_Y_FRACTION);
+    /** Result of matching detected spots against {@link #EXPECTED_SPOTS}: nearest-neighbour,
+     * one-to-one, within {@link #MATCH_TOLERANCE_FRACTION}. */
+    private static final class MatchResult {
+        final int matched;
+        final List<String> misses;
+        final int falsePositives; // detected spots not claimed by any expected position
 
-        int width = corrected.getWidth(), height = corrected.getHeight();
+        MatchResult(int matched, List<String> misses, int falsePositives) {
+            this.matched = matched;
+            this.misses = misses;
+            this.falsePositives = falsePositives;
+        }
+    }
+
+    private static MatchResult match(List<Spot> detected) {
         float tolPx = MATCH_TOLERANCE_FRACTION * Math.max(width, height);
-
-        List<String> misses = new ArrayList<>();
         boolean[] usedDetected = new boolean[detected.size()];
+        List<String> misses = new ArrayList<>();
+        int matched = 0;
+
         for (float[] expected : EXPECTED_SPOTS) {
             float tx = expected[0] * width, ty = expected[1] * height;
             int bestIdx = -1;
@@ -148,15 +163,88 @@ public class Img00451DetectionRegressionTest {
             }
             if (bestIdx >= 0 && bestD <= tolPx) {
                 usedDetected[bestIdx] = true;
+                matched++;
             } else {
                 misses.add(String.format("expected (%.3f, %.3f) -- nearest unused detection at %.1fpx away",
                         expected[0], expected[1], bestD));
             }
         }
 
+        int falsePositives = 0;
+        for (boolean used : usedDetected) if (!used) falsePositives++;
+        return new MatchResult(matched, misses, falsePositives);
+    }
+
+    @Test
+    public void legacyDetection_stillFindsAllEightKnownSpots() {
+        Assume.assumeTrue("Skipping: img_00451 source photo not present at " + IMAGE_PATH,
+                detectionImage != null);
+
+        List<Spot> detected = SpotDetector.detect(detectionImage, THRESHOLD_FACTOR, false,
+                ORIGIN_Y_FRACTION, FRONT_Y_FRACTION);
+        MatchResult result = match(detected);
+
         assertTrue("Legacy detection should still find all 8 previously-confirmed spots on "
                 + "img_00451 within " + (MATCH_TOLERANCE_FRACTION * 100) + "% tolerance. Misses:\n"
-                + String.join("\n", misses) + "\nDetected " + detected.size() + " spots total.",
-                misses.isEmpty());
+                + String.join("\n", result.misses) + "\nDetected " + detected.size() + " spots total.",
+                result.misses.isEmpty());
+    }
+
+    /**
+     * Scores shape-aware detection against the same 8 known positions. Empirically, at
+     * these exact parameters shape-aware matches all 8 with zero false positives -- a
+     * genuinely good result, consistent with CLAUDE.md's own Follow-up 3 account of this
+     * plate ("the floating spot no longer splits... lane 4's clean single-streak capture...
+     * lane-6 oval stays a single well-isolated spot"). This test's value isn't proving that
+     * again -- it's turning it into an exact, versioned number future shape-aware changes
+     * get checked against, replacing a fresh screenshot judgement call. If a future change
+     * regresses this count, that's a real signal to investigate, not necessarily grounds to
+     * just update the expected number.
+     */
+    @Test
+    public void shapeAwareDetection_matchesAllKnownSpotsWithNoFalsePositives() {
+        Assume.assumeTrue("Skipping: img_00451 source photo not present at " + IMAGE_PATH,
+                detectionImage != null);
+
+        List<Spot> detected = SpotDetector.detect(detectionImage, THRESHOLD_FACTOR, true,
+                ORIGIN_Y_FRACTION, FRONT_Y_FRACTION);
+        MatchResult result = match(detected);
+
+        assertEquals("Shape-aware should match all 8 known img_00451 positions. Misses:\n"
+                + String.join("\n", result.misses), 8, result.matched);
+        assertEquals("Shape-aware should produce no false-positive spots at these parameters",
+                0, result.falsePositives);
+    }
+
+    /**
+     * Turns CLAUDE.md's already-documented qualitative finding into an exact, versioned
+     * regression/characterization number -- and, in doing so, corrects it. CLAUDE.md's
+     * "Known remaining limitation — irregular real lane layouts" section recalled "still
+     * only 2 lanes detected, not 6" from an earlier interactive/visual pass; precisely
+     * re-running the exact CSV-recorded parameters headlessly gives <b>4</b>, not 2 --
+     * exactly the kind of fuzzy-recollection-vs-exact-number gap this whole synthetic/
+     * regression-fixture effort was built to catch (see the "Synthetic-plate integration
+     * tests" section of CLAUDE.md). CLAUDE.md has been corrected to say 4.
+     *
+     * <p>This plate's true layout is genuinely non-periodic (two dominant tailing streaks
+     * plus several smaller, irregularly-occupied lanes) -- no periodicity-based method,
+     * including this one, is expected to recover the visual 6-lane count from it; that's a
+     * real, currently-unsolved limitation (deliberately deferred pending a
+     * non-periodicity-based strategy), NOT a bug this test is asserting away. Its value is
+     * tracking the number exactly, so a future fix attempt has an automatic before/after
+     * instead of a fresh visual re-inspection.
+     */
+    @Test
+    public void laneDetection_currentCountOnIrregularRealLayout() {
+        Assume.assumeTrue("Skipping: img_00451 source photo not present at " + IMAGE_PATH,
+                corrected != null);
+
+        List<se.katalystnord.tlcdigitizer.model.Lane> lanes =
+                LaneDetector.detect(corrected, ORIGIN_Y_FRACTION);
+
+        assertEquals("Current lane count on img_00451's genuinely non-periodic real layout "
+                + "-- see this test's javadoc before assuming a change here is a regression "
+                + "(it may be a genuine fix, since 6 is the true visual count)",
+                4, lanes.size());
     }
 }
