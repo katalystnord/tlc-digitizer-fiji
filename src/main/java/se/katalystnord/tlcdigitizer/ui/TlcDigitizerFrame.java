@@ -135,9 +135,26 @@ public class TlcDigitizerFrame extends JFrame {
             }
         });
 
+        packWithExtraHeight();
+        setLocationRelativeTo(null);
+    }
+
+    /**
+     * {@code pack()} sizes the window to the tallest step panel's own preferred height with no
+     * margin, so a panel that's just barely tall enough to avoid its internal scroll pane (Step
+     * 5's method list + Labkit region-marking sub-panel, in particular) still ends up scrolling
+     * in practice once real content (status text, live counters) fills in. Adds a fixed margin of
+     * breathing room after every {@code pack()} so Step 5 fits without scrolling under normal use
+     * — clamped to the available screen height so it can't grow off-screen on a small display.
+     */
+    private void packWithExtraHeight() {
         pack();
         setMinimumSize(new Dimension(460, 0));
-        setLocationRelativeTo(null);
+        int extraHeight = 120;
+        int maxHeight = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds().height;
+        Dimension d = getSize();
+        setSize(d.width, Math.min(d.height + extraHeight, maxHeight));
     }
 
     private JPanel buildIndicatorBar() {
@@ -244,8 +261,7 @@ public class TlcDigitizerFrame extends JFrame {
         cardLayout.show(contentPanel, STEP_NAMES[step - 1]);
         stepPanels[step - 1].onEnter();
 
-        pack();
-        setMinimumSize(new Dimension(460, 0));
+        packWithExtraHeight();
     }
 
     void signalResult(StepResult result) {
@@ -1239,6 +1255,16 @@ public class TlcDigitizerFrame extends JFrame {
             // Labkit's probability map, once trained, replaces the source purely for the
             // threshold+connected-component step below -- integration in commit() always
             // integrates state.corrected, so this can't corrupt integration values.
+            //
+            // 2026-07-19: tried scaling Labkit-detected radii up 1.3x here (on the theory that
+            // probability-map-derived circles undersize the real signal, so SpotIntegrator's
+            // top-15%-by-intensity sum ends up averaged over too few pixels -- see
+            // Spot#integrationPixelCount). Tested via a real interactive Train & Detect + strict
+            // LOO recompute on MOESM4: it made things WORSE, not better (RSD 13.99% -> 19.10%,
+            // spot-1 recovery 80.4% -> 66.2%) -- widening pulled in more background/edge pixels
+            // rather than more real peak, hurting the faintest spot most. Reverted. Don't
+            // reintroduce a blanket radius multiplier here without a real controlled re-test;
+            // `integration_pixel_count` in the CSV export remains, and is what surfaced this.
             FloatProcessor detectionSource = (labkitRadio.isSelected() && labkitProbabilityMap != null)
                     ? labkitProbabilityMap : source();
             spots = SpotDetector.detect(detectionSource, mult, shapeAwareRadio.isSelected(),

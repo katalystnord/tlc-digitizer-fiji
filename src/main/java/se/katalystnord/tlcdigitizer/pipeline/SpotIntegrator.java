@@ -28,13 +28,16 @@ public final class SpotIntegrator {
     private SpotIntegrator() {}
 
     /**
-     * Computes the integration value for a single spot and stores it in
-     * {@link Spot#integrationValue}.
+     * Computes the integration value for a single spot and stores it, along with the
+     * number of pixels actually summed ({@link Spot#integrationPixelCount} — a small count
+     * means the value is averaged over few samples and is more sensitive to per-pixel
+     * noise), in the spot.
      */
     public static void integrate(FloatProcessor fp, Spot spot) {
-        spot.integrationValue = spot.hasMask()
-            ? integrateMask(fp, spot)
-            : integrateSpot(fp, spot.centroidX, spot.centroidY, spot.radius);
+        List<Float> values = spot.hasMask() ? collectMaskValues(fp, spot)
+                                             : collectSpotValues(fp, spot.centroidX, spot.centroidY, spot.radius);
+        spot.integrationValue = sumTopFraction(values);
+        spot.integrationPixelCount = topFractionCount(values);
     }
 
     /**
@@ -52,6 +55,20 @@ public final class SpotIntegrator {
      * and sums the top {@value #TOP_FRACTION} fraction.
      */
     static double integrateSpot(FloatProcessor fp, float cx, float cy, float radius) {
+        return sumTopFraction(collectSpotValues(fp, cx, cy, radius));
+    }
+
+    /**
+     * Returns the integration value for a shape-aware spot: collects pixel values
+     * within {@link Spot#mask}, sorts descending, and sums the top {@value #TOP_FRACTION}
+     * fraction — same robustness rule as {@link #integrateSpot}, just over the spot's
+     * true connected shape instead of a fixed circle.
+     */
+    static double integrateMask(FloatProcessor fp, Spot spot) {
+        return sumTopFraction(collectMaskValues(fp, spot));
+    }
+
+    private static List<Float> collectSpotValues(FloatProcessor fp, float cx, float cy, float radius) {
         int width = fp.getWidth();
         int height = fp.getHeight();
         float[] pixels = (float[]) fp.getPixels();
@@ -73,29 +90,10 @@ public final class SpotIntegrator {
                 }
             }
         }
-
-        if (values.isEmpty()) {
-            return 0.0;
-        }
-
-        // Sort descending
-        Collections.sort(values, Collections.reverseOrder());
-
-        int cutoff = Math.max(1, (int) (values.size() * TOP_FRACTION));
-        double sum = 0.0;
-        for (int i = 0; i < cutoff; i++) {
-            sum += values.get(i);
-        }
-        return sum;
+        return values;
     }
 
-    /**
-     * Returns the integration value for a shape-aware spot: collects pixel values
-     * within {@link Spot#mask}, sorts descending, and sums the top {@value #TOP_FRACTION}
-     * fraction — same robustness rule as {@link #integrateSpot}, just over the spot's
-     * true connected shape instead of a fixed circle.
-     */
-    static double integrateMask(FloatProcessor fp, Spot spot) {
+    private static List<Float> collectMaskValues(FloatProcessor fp, Spot spot) {
         int width = fp.getWidth();
         float[] pixels = (float[]) fp.getPixels();
 
@@ -108,18 +106,27 @@ public final class SpotIntegrator {
                 }
             }
         }
+        return values;
+    }
 
+    private static double sumTopFraction(List<Float> values) {
         if (values.isEmpty()) {
             return 0.0;
         }
-
-        Collections.sort(values, Collections.reverseOrder());
-
-        int cutoff = Math.max(1, (int) (values.size() * TOP_FRACTION));
+        List<Float> sorted = new ArrayList<>(values);
+        Collections.sort(sorted, Collections.reverseOrder());
+        int cutoff = Math.max(1, (int) (sorted.size() * TOP_FRACTION));
         double sum = 0.0;
         for (int i = 0; i < cutoff; i++) {
-            sum += values.get(i);
+            sum += sorted.get(i);
         }
         return sum;
+    }
+
+    private static int topFractionCount(List<Float> values) {
+        if (values.isEmpty()) {
+            return 0;
+        }
+        return Math.max(1, (int) (values.size() * TOP_FRACTION));
     }
 }

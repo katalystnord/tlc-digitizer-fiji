@@ -45,6 +45,16 @@ public class Spot {
     /** Raw integration value (sum of top-15% pixels in the spot's region). Set after Stage 6. */
     public double integrationValue = Double.NaN;
 
+    /**
+     * Number of pixels actually summed into {@link #integrationValue} (the top-15% cutoff
+     * count, not the full region size). Set after Stage 6. A small count means the
+     * integration value is averaged over few samples and is more sensitive to per-pixel
+     * noise -- e.g. Labkit-detected spots, whose probability-map-derived geometry tends to
+     * undersize the real signal extent relative to legacy's intensity-derived geometry (see
+     * {@code TlcDigitizerFrame.widenLabkitRadii}'s javadoc).
+     */
+    public int integrationPixelCount = 0;
+
     /** True if the user has designated this spot as a calibration reference. */
     public boolean isReference = false;
 

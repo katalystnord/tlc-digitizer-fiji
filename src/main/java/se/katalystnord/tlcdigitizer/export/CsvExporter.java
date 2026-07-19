@@ -12,9 +12,10 @@ import java.util.List;
 /**
  * Stage 8: CSV export.
  *
- * Output columns (per CLAUDE.md specification):
+ * Output columns (per CLAUDE.md specification, plus {@code integration_pixel_count}
+ * added 2026-07-19 as a diagnostic — see {@link Spot#integrationPixelCount}):
  *   spot_id, lane, rf_value, centroid_x_fraction, centroid_y_fraction,
- *   radius_fraction, integration_value, assigned_concentration,
+ *   radius_fraction, integration_value, integration_pixel_count, assigned_concentration,
  *   is_reference, reference_concentration
  *
  * The header section also records analysis parameters so results are
@@ -127,11 +128,11 @@ public final class CsvExporter {
         int imageHeight = (state.corrected != null) ? state.corrected.getHeight() : 1;
 
         pw.println("spot_id,lane,rf_value,centroid_x_fraction,centroid_y_fraction," +
-                   "radius_fraction,integration_value,assigned_concentration," +
+                   "radius_fraction,integration_value,integration_pixel_count,assigned_concentration," +
                    "is_reference,reference_concentration");
 
         for (Spot s : spots) {
-            pw.printf("%d,%d,%s,%.6f,%.6f,%.6f,%s,%s,%b,%s%n",
+            pw.printf("%d,%d,%s,%.6f,%.6f,%.6f,%s,%d,%s,%b,%s%n",
                 s.id,
                 s.lane,
                 formatDouble(s.rfValue),
@@ -139,6 +140,7 @@ public final class CsvExporter {
                 s.centroidY / imageHeight,
                 s.radius / Math.max(imageWidth, imageHeight),
                 formatDouble(s.integrationValue),
+                s.integrationPixelCount,
                 formatDouble(s.assignedConcentration),
                 s.isReference,
                 formatDouble(s.referenceConcentration));

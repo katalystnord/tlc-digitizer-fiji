@@ -20,7 +20,17 @@
     "      Verified: re-warping with the converted corners reproduces the exact",
     "      1503x2963 corrected-image size reported by the interactive session.",
     "Plate image: 41598_2022_17527_MOESM4_ESM.jpg (4096×1949 px).",
-    "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4."
+    "Source: Hauk et al., Sci. Rep. 12, 13433 (2022), Supplementary Figure S4.",
+    "SWITCHED TO POLYNOMIAL 2026-07-19: while investigating a Labkit quantification gap on this",
+    "      plate (see CLAUDE.md's Labkit section), tested polynomial background as an alternative",
+    "      to top-hat -- the same swap already made for MOESM3 for the same reason (top-hat",
+    "      leaving a residual illumination artifact top-hat's local morphological opening",
+    "      doesn't fully flatten). Interactive re-test (legacy, threshold=1.0, 5/5 auto-detected,",
+    "      exact same corners/lines as the top-hat run): RSD dropped from 11.42% (interactive",
+    "      top-hat re-test) to 2.59%, mean recovery 99.81%. This is not just a Labkit fix --",
+    "      polynomial is better for legacy on this plate too. Confirmed via the full",
+    "      ValidationTest suite after this change (see 'Status' section in CLAUDE.md for the",
+    "      resulting benchmark numbers)."
   ],
 
   "imagePath": "41598_2022_17527_MOESM4_ESM.jpg",
@@ -28,11 +38,11 @@
 
   "invertImage": true,
   "useGreenChannel": true,
-  "usePolynomialBackground": false,
-  "useTopHatBackground": true,
+  "usePolynomialBackground": true,
+  "useTopHatBackground": false,
   "topHatSeRadius": 152.25,
-  "_thresholdNote": "Interactive UI: white top-hat, threshold 1.05 -> 5/5 SMX spots auto-detected (1.0 also caught one spurious off-row blob).",
-  "thresholdFactor": 1.05,
+  "_thresholdNote": "2026-07-19: switched to polynomial background -- threshold=1.0 -> 5/5 SMX spots auto-detected (matches the interactive re-test that motivated this change).",
+  "thresholdFactor": 1.0,
 
   "_cornerNote": "Landscape-space corners, converted from portrait CSV export (see _notes).",
   "corners": [1003.8333, 1607.8334, 990.5, 127.5, 3940.0, 126.0, 3967.1667, 1629.5],
