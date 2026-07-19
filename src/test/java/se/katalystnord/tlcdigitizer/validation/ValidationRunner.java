@@ -41,6 +41,41 @@ import java.util.*;
  */
 public final class ValidationRunner {
 
+    /**
+     * R² tolerance for the radius-optimisation grid search's scale selection (see
+     * {@link #run}, Stage 6): among all scales within this much of the true maximum R²,
+     * the smallest is chosen, rather than whichever single grid point has the strictly
+     * highest R².
+     *
+     * <p><b>Why this matters — MOESM3 investigation, 2026-07-19:</b> the R² vs. radius-scale
+     * curve is often very flat near its peak (a structural consequence of
+     * {@link se.katalystnord.tlcdigitizer.pipeline.SpotIntegrator} summing only the top 15%
+     * of pixels by intensity — once a scale's circle is big enough to contain the true
+     * bright core, growing it further mostly adds background pixels that never rank into
+     * that top 15%, so R² stops responding to scale). On MOESM3, adjacent grid points
+     * (1.7× vs. 1.8×) differed in R² by as little as 0.0001, or were exactly tied to 4
+     * decimal places — noise-level, not a real difference in fit quality. A naive
+     * single-pass {@code >} selection picks whichever side of that tie the floating-point
+     * arithmetic happens to favour, which can flip for a change in detection threshold as
+     * small as 0.01, multiplying every reference spot's integration radius by a different
+     * amount all at once (a real, non-negligible ~6% radius / ~12% area change between
+     * 1.7× and 1.8×) — the actual mechanism behind MOESM3's previously-unexplained
+     * threshold-sensitivity (16.29% RSD at 0.80–0.82, 33%+ at 0.75). Confirmed via a
+     * diagnostic sweep that the tie only relocates (doesn't disappear) for smaller
+     * tolerances, and that too large a tolerance (0.010) admits meaningfully worse scales
+     * into contention, reintroducing instability from a different cause. 0.005 was the
+     * value that held a single, stable scale across the whole 0.70–0.90 threshold range
+     * tested — a data-driven starting point, not yet independently re-validated beyond
+     * that range or against other fixtures' own grid searches.
+     *
+     * <p><b>Consequence worth remembering:</b> this fix reveals MOESM3's previously-reported
+     * 16.29% RSD was itself the lucky side of that same noise-level tie, not a genuine,
+     * reproducible measurement — the stabilised number is closer to 23% at threshold=0.80.
+     * See CLAUDE.md's MOESM3 section for the full investigation and its implications for
+     * the methods paper's §4.2 framing decision.
+     */
+    static final double RADIUS_SCALE_R2_TOLERANCE = 0.005;
+
     private ValidationRunner() {}
 
     // -------------------------------------------------------------------------
@@ -250,8 +285,13 @@ public final class ValidationRunner {
         // tolerates mild overlap at large scales.  Overlap capping belongs in the
         // interactive UI (Step 6) where polynomial-mode has no per-spot correction.
 
-        double bestR2 = -Double.MAX_VALUE;
-        double bestScale = 1.0;
+        // Two-pass selection: find the true best R² across the grid, then pick the
+        // *smallest* scale within RADIUS_SCALE_R2_TOLERANCE of it, rather than whichever
+        // grid point happens to edge out the rest by a noise-level margin. See
+        // RADIUS_SCALE_R2_TOLERANCE's javadoc for why the naive single-pass `>` selection
+        // is a real bug, not just a style preference (MOESM3 investigation, 2026-07-19).
+        double maxR2 = -Double.MAX_VALUE;
+        Map<Double, Double> r2ByScale = new LinkedHashMap<>();
         for (int step = 5; step <= 25; step++) {
             double scale = step / 10.0;
             List<Spot> temp = new ArrayList<>();
@@ -267,8 +307,16 @@ public final class ValidationRunner {
             BackgroundCorrection.applyPerSpotPolynomial(temp, integrationBase, sgDeg);
             try {
                 CalibrationModel m = CalibrationModel.fit(temp, CalibrationModel.ModelType.LINEAR);
-                if (m.rSquared > bestR2) { bestR2 = m.rSquared; bestScale = scale; }
+                r2ByScale.put(scale, m.rSquared);
+                if (m.rSquared > maxR2) maxR2 = m.rSquared;
             } catch (IllegalArgumentException ignored) {}
+        }
+        double bestScale = 1.0;
+        for (Map.Entry<Double, Double> e : r2ByScale.entrySet()) {
+            if (e.getValue() >= maxR2 - RADIUS_SCALE_R2_TOLERANCE) {
+                bestScale = e.getKey();
+                break;
+            }
         }
 
         // Rebuild refSpots with best scale permanently applied

@@ -2000,13 +2000,25 @@ public class TlcDigitizerFrame extends JFrame {
             return CalibrationModel.ModelType.LINEAR;
         }
 
+        /**
+         * R² tolerance for picking a winning radius scale out of the grid search below:
+         * among all scales within this much of the true maximum R², the smallest is
+         * chosen, rather than whichever single grid point has the strictly highest R².
+         * Same constant, same rationale, as {@code ValidationRunner.RADIUS_SCALE_R2_TOLERANCE}
+         * (MOESM3 investigation, 2026-07-19) — a naive single-pass {@code >} selection
+         * picks whichever side of a noise-level near-tie the floating-point arithmetic
+         * happens to favour, which can flip for a tiny change elsewhere in the pipeline,
+         * multiplying every reference spot's integration radius by a different amount all
+         * at once. Also reused below as the "not meaningfully better than baseline"
+         * threshold for the info-dialog fallback.
+         */
+        private static final double RADIUS_SCALE_R2_TOLERANCE = 0.005;
+
         private void optimizeIntegrationRadius() {
             List<Spot> curRefs = currentRefSpots();
             if (curRefs.size() < 3 || state.corrected == null) return;
             CalibrationModel.ModelType mt = selectedModelType();
             double baseR2 = CalibrationModel.fit(curRefs, mt).rSquared;
-            double bestR2 = baseR2;
-            double bestScale = 1.0;
             int imgH = state.corrected.getHeight();
 
             // Cap scale so no two spot circles overlap (90% of half inter-centroid distance).
@@ -2022,7 +2034,11 @@ public class TlcDigitizerFrame extends JFrame {
             }
             maxSafeScale = Math.max(maxSafeScale, 0.5); // never shrink below minimum
 
-            // Grid search: radius scale 0.5× to 2.5× in steps of 0.1 (capped by overlap limit)
+            // Grid search: radius scale 0.5× to 2.5× in steps of 0.1 (capped by overlap limit).
+            // Two-pass selection (see RADIUS_SCALE_R2_TOLERANCE javadoc): find the true best
+            // R² first, then pick the smallest scale within tolerance of it.
+            double maxR2 = baseR2;
+            Map<Double, Double> r2ByScale = new LinkedHashMap<>();
             for (int step = 5; step <= 25; step++) {
                 double scale = step / 10.0;
                 if (scale > maxSafeScale) break;
@@ -2046,11 +2062,21 @@ public class TlcDigitizerFrame extends JFrame {
                 if (tempRefs.size() < 3) continue;
                 try {
                     double r2 = CalibrationModel.fit(tempRefs, mt).rSquared;
-                    if (r2 > bestR2) { bestR2 = r2; bestScale = scale; }
+                    r2ByScale.put(scale, r2);
+                    if (r2 > maxR2) maxR2 = r2;
                 } catch (Exception ignored) {}
             }
+            double bestScale = 1.0;
+            double bestR2 = baseR2;
+            for (Map.Entry<Double, Double> e : r2ByScale.entrySet()) {
+                if (e.getValue() >= maxR2 - RADIUS_SCALE_R2_TOLERANCE) {
+                    bestScale = e.getKey();
+                    bestR2 = e.getValue();
+                    break;
+                }
+            }
 
-            if (bestScale == 1.0 || bestR2 <= baseR2 + 0.005) {
+            if (bestScale == 1.0 || bestR2 <= baseR2 + RADIUS_SCALE_R2_TOLERANCE) {
                 JOptionPane.showMessageDialog(TlcDigitizerFrame.this,
                     String.format("<html>Current radius is already optimal.<br>R² = %.4f</html>",
                         baseR2),
