@@ -142,6 +142,19 @@
   .install-card ol{margin:0; padding-left:18px; font-size:13.5px; color:var(--ink-soft);}
   .install-card li{margin-bottom:6px;}
 
+  .walk{display:flex; flex-direction:column; gap:20px;}
+  .walk-row{
+    display:grid; grid-template-columns:280px 1fr; gap:22px; align-items:center;
+    background:var(--bg-raised); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; box-shadow:var(--shadow);
+  }
+  .walk-row .n{font-family:var(--mono); font-size:12px; color:var(--accent); font-weight:700; letter-spacing:.04em; margin-bottom:6px;}
+  .walk-row h3{font-size:16px; margin:0 0 6px;}
+  .walk-row p{font-size:13.5px; color:var(--ink-soft); margin:0;}
+  .walk-row img{width:100%; max-height:340px; object-fit:contain; display:block; border-radius:8px; border:1px solid var(--line); background:var(--code-bg); margin:0 auto;}
+  .walk-row.no-shot{grid-template-columns:1fr;}
+  @media (max-width:640px){ .walk-row{grid-template-columns:1fr;} }
+
   .refs{font-size:13.5px; color:var(--ink-soft); margin:0; padding-left:0; list-style:none;}
   .refs li{padding:10px 0; border-bottom:1px solid var(--line);}
   .refs li:last-child{border-bottom:none;}
@@ -185,57 +198,97 @@
       <a class="btn btn-primary" href="https://github.com/katalystnord/tlc-digitizer-fiji">View on GitHub</a>
       <a class="btn btn-secondary" href="#install">Installation</a>
     </div>
+    <img src="images/hero-wizard.png" loading="eager"
+         alt="The TLC Digitizer wizard: the Step 5 Spots panel on the left showing the four detection methods and a live spot count, and on the right the resulting image with all 8 spots circled and numbered on a real, hard-case UV254 plate."
+         style="width:100%; display:block; margin-top:40px; border-radius:var(--radius); border:1px solid var(--line); box-shadow:var(--shadow);">
   </div>
 </div>
-
-<section id="example" style="padding-top:48px;">
-  <div class="wrap">
-    <div class="gallery" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px;">
-      <figure style="margin:0;">
-        <img src="images/screenshot-real-plate.png" loading="lazy"
-             alt="TLC Digitizer's Step 5 window showing seven detected spots, including two long tailing streaks, on an off-axis smartphone photo of a real UV254 plate."
-             style="width:100%; display:block; border-radius:var(--radius); border:1px solid var(--line); box-shadow:var(--shadow);">
-        <figcaption style="font-size:12.5px; color:var(--ink-faint); margin-top:8px;">
-          A real, off-axis smartphone photo, including two tailing/streaking lanes.
-        </figcaption>
-      </figure>
-      <figure style="margin:0;">
-        <img src="images/screenshot-reference-plate.png" loading="lazy"
-             alt="TLC Digitizer's Step 5 window showing six cleanly detected spots on a TLCyzer reference plate, each in a different colour circle, above a hand-drawn Rf ruler."
-             style="width:100%; display:block; border-radius:var(--radius); border:1px solid var(--line); box-shadow:var(--shadow);">
-        <figcaption style="font-size:12.5px; color:var(--ink-faint); margin-top:8px;">
-          Clean detection on a TLCyzer reference plate, scored against the published concentrations.
-        </figcaption>
-      </figure>
-      <figure style="margin:0;">
-        <img src="images/screenshot-labkit-marking.png" loading="lazy"
-             alt="TLC Digitizer's Step 5 window in Labkit training mode, showing user-marked spot regions (green) and background regions (orange) overlaid on a plate image."
-             style="width:100%; display:block; border-radius:var(--radius); border:1px solid var(--line); box-shadow:var(--shadow);">
-        <figcaption style="font-size:12.5px; color:var(--ink-faint); margin-top:8px;">
-          Marking example regions to train the Labkit classifier, before Train &amp; Detect.
-        </figcaption>
-      </figure>
-    </div>
-  </div>
-</section>
 
 <section id="pipeline">
   <div class="wrap">
     <h2>How it works</h2>
     <p class="section-lede">
-      An eight-stage pipeline, directly derived from the peer-reviewed
+      The wizard, step by step — run here on a real, off-axis smartphone photo of a UV254 plate
+      with two tailing/streaking lanes, one of the harder cases in the project's test corpus.
+      Directly derived from the peer-reviewed
       <a href="https://doi.org/10.1038/s41598-022-17527-y">TLCyzer algorithm</a>
       (Hauk et al., <em>Scientific Reports</em> 2022), with additions from the qTLC and qtlc literature.
     </p>
-    <div class="steps">
-      <div class="step"><div class="n">01</div><h3>Image preparation</h3><p>Luminance or green-channel greyscale conversion.</p></div>
-      <div class="step"><div class="n">02</div><h3>Perspective correction</h3><p>Hough-detected corners, homography warp to a rectified plate.</p></div>
-      <div class="step"><div class="n">03</div><h3>Background correction</h3><p>Quartic polynomial, white top-hat, or Savitzky-Golay.</p></div>
-      <div class="step"><div class="n">04</div><h3>Reference lines</h3><p>User marks origin and solvent front to define the Rf axis.</p></div>
-      <div class="step"><div class="n">05</div><h3>Spot detection</h3><p>Centroid, radius and Rf per spot — four selectable methods.</p></div>
-      <div class="step"><div class="n">06</div><h3>Integration</h3><p>Top-15% intensity sum per spot, robust to edge noise.</p></div>
-      <div class="step"><div class="n">07</div><h3>Calibration</h3><p>OLS regression on ≥3 references; reports R², LOD, LOQ.</p></div>
-      <div class="step"><div class="n">08</div><h3>CSV export</h3><p>Every parameter logged — results are fully reproducible.</p></div>
+    <div class="walk">
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 1</div>
+          <h3>Image</h3>
+          <p>Convert the raw photo to greyscale — luminance, or green-channel for UV-fluorescence plates like this one.</p>
+        </div>
+        <img src="images/walkthrough-1-image.png" loading="lazy"
+             alt="The original raw smartphone photo of the UV254 plate, greenish fluorescence, before any processing.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 2</div>
+          <h3>Perspective</h3>
+          <p>Corners are auto-detected via Hough line detection and shown as draggable handles for manual correction.</p>
+        </div>
+        <img src="images/walkthrough-2-perspective.png" loading="lazy"
+             alt="The raw tilted photo with four red draggable corner handles (TL, TR, BL, BR) outlining the plate.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 3</div>
+          <h3>Background</h3>
+          <p>Quartic polynomial, white top-hat, or Savitzky-Golay correction flattens uneven illumination.</p>
+        </div>
+        <img src="images/walkthrough-3-background.png" loading="lazy"
+             alt="The rectified, background-corrected plate image, illumination flattened.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 4</div>
+          <h3>Rf lines</h3>
+          <p>Mark the origin (red) and solvent front (blue) — every spot's Rf is computed relative to these two lines.</p>
+        </div>
+        <img src="images/walkthrough-4-rflines.png" loading="lazy"
+             alt="The corrected plate image with a red origin line and a blue solvent-front line marked near the top and bottom.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 5</div>
+          <h3>Spots</h3>
+          <p>Auto-detect, then confirm or adjust — all 8 spots found here, including both tailing streaks and a faint floating spot.</p>
+        </div>
+        <img src="images/walkthrough-5-spots.png" loading="lazy"
+             alt="The plate image with eight detected spots circled and numbered, including both tailing streaks and a faint floating spot.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 6</div>
+          <h3>Calibrate</h3>
+          <p>Tick ≥3 reference spots, enter known concentrations. Linear/log-log/quadratic fit, with live R², LOD and LOQ.</p>
+        </div>
+        <img src="images/screenshot-calibration.png" loading="lazy"
+             alt="TLC Digitizer's Step 6 Calibrate panel on a real reference plate, showing three reference concentrations fit with R-squared 0.9970.">
+      </div>
+      <div class="walk-row">
+        <div>
+          <div class="n">STEP 7</div>
+          <h3>Export</h3>
+          <p>Every spot, every calibration parameter, every analysis setting — written to a CSV, an annotated PNG, and a TIFF with the CSV embedded in its metadata.</p>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="font-size:12.5px;">
+            <thead><tr><th>spot_id</th><th class="num">rf_value</th><th class="num">integration_value</th><th class="num">assigned_conc.</th><th>reference?</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td class="num">0.362</td><td class="num">165,315</td><td class="num">59.26</td><td>60.0 (ref)</td></tr>
+              <tr><td>2</td><td class="num">0.355</td><td class="num">249,461</td><td class="num">97.89</td><td>—</td></tr>
+              <tr><td>3</td><td class="num">0.352</td><td class="num">214,219</td><td class="num">81.71</td><td>80.0 (ref)</td></tr>
+              <tr><td>4</td><td class="num">0.354</td><td class="num">228,136</td><td class="num">88.10</td><td>—</td></tr>
+              <tr><td>5</td><td class="num">0.355</td><td class="num">251,953</td><td class="num">99.03</td><td>100.0 (ref)</td></tr>
+            </tbody>
+          </table>
+          <p style="font-size:12px; color:var(--ink-faint); margin:8px 0 0;">Real export, MOESM2 — R² = 0.9945, LOD 15,091, LOQ 45,732 (plus corner coordinates, background method, threshold, and every other setting, logged in the CSV header).</p>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -285,13 +338,6 @@
         <tr class="total"><td>Overall (n = 15)</td><td class="num">97.56%</td><td class="num">12.67%</td><td>—</td></tr>
       </tbody>
     </table>
-    <div class="note">
-      <strong>Honest framing:</strong> this is one published, small dataset (3 plates, 15 spots),
-      and it stays inside the TLCyzer paper's own 96.8–103.9% recovery band — but n=15 leaves real
-      room for overfitting, and MOESM3's RSD is known to be threshold-sensitive. The project's own
-      next step is a systematic parallel benchmark against the reference TLCyzer app, followed by a
-      call for fresh, purpose-collected plates — not further tuning against these same three images.
-    </div>
   </div>
 </section>
 
