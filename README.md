@@ -42,7 +42,7 @@ three are opt-in, off by default, and explicitly labelled beta in the UI:
 | **Legacy (mean threshold)** | Fixed circular ROI at image-mean threshold (above) | **Validated** — recommended |
 | **Shape-aware detection** | Hysteresis-linking + watershed peak separation; integrates each spot's true connected shape instead of a fixed circle — better for streaking/tailing spots | Beta — not yet validated |
 | **Lane detection** | CWT-based lane-boundary detection on the column intensity profile, assigning spots to lanes independent of spot detection (can represent a genuinely empty lane) | Beta — known gap on irregular/non-periodic real layouts |
-| **Advanced detection (Labkit)** | Random-forest pixel classifier (via [Labkit](https://imagej.net/plugins/labkit)) trained from a handful of user-marked example regions per image — better for faint spots and tailing lanes | Beta — detection geometry is solid, but quantification (recovery/RSD) still lags the legacy benchmark; see project history for the full validation writeup |
+| **Advanced detection (Labkit)** | Random-forest pixel classifier (via [Labkit](https://imagej.net/plugins/labkit)) trained from a handful of user-marked example regions per image — better for faint spots and tailing lanes | Beta — detection geometry is validated (5/5 spots, zero false positives on all three reference plates); quantification is close to the legacy benchmark once background method and pipeline settings are matched — see project history for the full writeup |
 
 ### Key references
 
@@ -144,8 +144,15 @@ Two additional, larger-scale test tiers:
   ```sh
   ./mvnw test -Dtest=ValidationTest -Dvalidation.data.dir=/path/to/tlcyzer-paper
   ```
-  Current benchmark (legacy detection): overall n=15, mean recovery 98.68%, RSD 9.94% — inside the
+  Current benchmark (legacy detection): overall n=15, mean recovery 97.56%, RSD 12.67% — inside the
   TLCyzer paper's own 96.8–103.9% recovery band. See the fixture JSONs under `validation/tlcyzer-paper/`.
+
+  | Plate | Mean recovery | RSD | Background method |
+  |-------|----------------|-----|---------------------|
+  | MOESM2 | 101.1% | 4.71% | polynomial |
+  | MOESM3 (HCT) | 92.12% | 22.76% | polynomial, threshold 0.80 |
+  | MOESM4 (SMX) | 99.42% | 3.94% | polynomial, threshold 1.0 |
+  | **Overall (n=15)** | **97.56%** | **12.67%** | |
 
 ---
 
