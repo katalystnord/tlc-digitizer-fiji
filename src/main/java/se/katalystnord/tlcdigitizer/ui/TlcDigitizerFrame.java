@@ -64,7 +64,7 @@ public class TlcDigitizerFrame extends JFrame {
     // Navigation controls
     private JButton backBtn;
     private JButton nextBtn;
-    private JLabel[] stepIndicators;
+    private Ui.StepChip[] stepIndicators;
 
     // Content
     private JPanel contentPanel;
@@ -106,7 +106,27 @@ public class TlcDigitizerFrame extends JFrame {
         add(buildIndicatorBar(), BorderLayout.NORTH);
 
         cardLayout = new CardLayout();
-        contentPanel = new JPanel(cardLayout);
+        // CardLayout reports the MAXIMUM preferred size across every card, so all seven steps
+        // were sized to the tallest one (Step 6's calibration table) and the short steps carried
+        // a large block of dead space -- Step 5 was roughly 40% empty. Re-pack()ing per step
+        // could not shrink it, because the layout kept reporting that same maximum.
+        //
+        // Width still comes from the maximum, deliberately: a window whose width changed per
+        // step would jitter as the user advances. Only the height follows the visible card.
+        contentPanel = new JPanel(cardLayout) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension max = super.getPreferredSize();
+                Insets in = getInsets();
+                for (Component c : getComponents()) {
+                    if (c.isVisible()) {
+                        return new Dimension(max.width,
+                            c.getPreferredSize().height + in.top + in.bottom);
+                    }
+                }
+                return max;
+            }
+        };
         contentPanel.setBorder(BorderFactory.createEmptyBorder(10, 12, 6, 12));
 
         stepPanels = new AbstractStepPanel[]{
@@ -135,39 +155,55 @@ public class TlcDigitizerFrame extends JFrame {
             }
         });
 
-        packWithExtraHeight();
+        packToCurrentStep();
         setLocationRelativeTo(null);
     }
 
     /**
-     * {@code pack()} sizes the window to the tallest step panel's own preferred height with no
-     * margin, so a panel that's just barely tall enough to avoid its internal scroll pane (Step
-     * 5's method list + Labkit region-marking sub-panel, in particular) still ends up scrolling
-     * in practice once real content (status text, live counters) fills in. Adds a fixed margin of
-     * breathing room after every {@code pack()} so Step 5 fits without scrolling under normal use
-     * — clamped to the available screen height so it can't grow off-screen on a small display.
+     * Sizes the window to the <em>current</em> step's own content.
+     *
+     * <p>This previously added a fixed 120px of slack after every {@code pack()}, because Step 5
+     * kept ending up inside its own scroll pane. That was treating a symptom: the real cause was
+     * {@code CardLayout} reporting the tallest card's height for every card (see
+     * {@link #buildUI()}), so the slack compounded the problem it was meant to hide — every step
+     * paid for the tallest one, plus 120px. With the content panel now reporting the visible
+     * card's height, {@code pack()} alone is correct and each step is as tall as it needs to be.
+     *
+     * <p>Still clamped to the usable screen height so a tall step cannot run off-screen.
      */
-    private void packWithExtraHeight() {
+    private void packToCurrentStep() {
         pack();
         setMinimumSize(new Dimension(460, 0));
-        int extraHeight = 120;
         int maxHeight = GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .getMaximumWindowBounds().height;
         Dimension d = getSize();
-        setSize(d.width, Math.min(d.height + extraHeight, maxHeight));
+        if (d.height > maxHeight) setSize(d.width, maxHeight);
+    }
+
+    /**
+     * Re-lays out and re-sizes the window after a step reveals or hides part of its own content
+     * (Step 3's top-hat / Savitzky-Golay option rows, Step 5's Labkit sub-panel).
+     *
+     * <p>Without this the window keeps whatever height it had when the step was entered, so
+     * newly-revealed controls are simply cut off the bottom — Step 3's Savitzky-Golay option
+     * disappeared entirely once the top-hat SE row appeared. This was previously masked by a
+     * fixed block of spare height that {@link #packToCurrentStep()} used to add to every step.
+     */
+    void relayoutStep() {
+        contentPanel.revalidate();
+        packToCurrentStep();
     }
 
     private JPanel buildIndicatorBar() {
-        stepIndicators = new JLabel[STEP_NAMES.length];
+        stepIndicators = new Ui.StepChip[STEP_NAMES.length];
         JPanel bar = new JPanel(new GridLayout(1, STEP_NAMES.length, 0, 0));
-        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY));
+        bar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, Ui.line()),
+            BorderFactory.createEmptyBorder(4, 6, 4, 6)));
         for (int i = 0; i < STEP_NAMES.length; i++) {
-            JLabel lbl = new JLabel(STEP_NAMES[i], SwingConstants.CENTER);
-            lbl.setFont(lbl.getFont().deriveFont(Font.PLAIN, 11f));
-            lbl.setOpaque(true);
-            lbl.setBorder(BorderFactory.createEmptyBorder(5, 2, 5, 2));
-            stepIndicators[i] = lbl;
-            bar.add(lbl);
+            Ui.StepChip chip = new Ui.StepChip(STEP_NAMES[i]);
+            stepIndicators[i] = chip;
+            bar.add(chip);
         }
         return bar;
     }
@@ -242,17 +278,14 @@ public class TlcDigitizerFrame extends JFrame {
     private void activateStep(int step) {
         currentStep = step;
 
-        // Update step indicator colours
+        // Three states, not two: a completed step now looks different from one not yet reached,
+        // which the old flat bar (active = solid blue block, everything else identical) could
+        // not express.
         for (int i = 0; i < stepIndicators.length; i++) {
-            boolean active = (i == step - 1);
-            stepIndicators[i].setBackground(active
-                ? new Color(0x1E5FAE)
-                : UIManager.getColor("Panel.background"));
-            stepIndicators[i].setForeground(active
-                ? Color.WHITE
-                : UIManager.getColor("Label.foreground"));
-            stepIndicators[i].setFont(stepIndicators[i].getFont()
-                .deriveFont(active ? Font.BOLD : Font.PLAIN));
+            stepIndicators[i].setState(
+                i == step - 1 ? Ui.StepState.ACTIVE
+              : i <  step - 1 ? Ui.StepState.DONE
+              :                 Ui.StepState.UPCOMING);
         }
 
         backBtn.setEnabled(step > 1);
@@ -261,7 +294,7 @@ public class TlcDigitizerFrame extends JFrame {
         cardLayout.show(contentPanel, STEP_NAMES[step - 1]);
         stepPanels[step - 1].onEnter();
 
-        packWithExtraHeight();
+        packToCurrentStep();
     }
 
     void signalResult(StepResult result) {
@@ -369,14 +402,28 @@ public class TlcDigitizerFrame extends JFrame {
 
         // --- Layout helpers ---
 
+        /**
+         * The instruction block at the top of a step.
+         *
+         * <p>Must be LEFT-aligned explicitly. Swing defaults a {@code JPanel} to {@code CENTER}
+         * alignment, and a {@code BoxLayout.Y_AXIS} that mixes alignment values lays the
+         * LEFT-aligned children out relative to the centred child rather than the container —
+         * which indented every control on the step and squeezed wrapped labels into a narrower
+         * width than their reserved height allowed for, clipping their last line.
+         *
+         * <p>Also clamped in height: without a maximum, BoxLayout will stretch this block into
+         * any spare vertical space instead of leaving it at the top where it belongs.
+         */
         JPanel instrPanel(String html) {
-            JLabel lbl = new JLabel("<html><body style='width:480px'>" + html + "</body></html>");
-            lbl.setFont(lbl.getFont().deriveFont(12f));
+            JLabel lbl = new JLabel(Ui.wrap(html));
+            lbl.setFont(Ui.body());
             JPanel p = new JPanel(new BorderLayout());
             p.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, Color.LIGHT_GRAY),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Ui.line()),
                 BorderFactory.createEmptyBorder(0, 0, 10, 0)));
             p.add(lbl, BorderLayout.WEST);
+            p.setAlignmentX(LEFT_ALIGNMENT);
+            p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
             return p;
         }
 
@@ -728,8 +775,21 @@ public class TlcDigitizerFrame extends JFrame {
             sgOptions.setVisible(false);
             add(sgOptions);
 
-            topHatBtn.addChangeListener(e -> topHatOptions.setVisible(topHatBtn.isSelected()));
-            sgBtn.addChangeListener(e -> sgOptions.setVisible(sgBtn.isSelected()));
+            // Re-pack on an actual visibility change only: a ChangeListener also fires for
+            // armed/pressed/rollover transitions, and re-packing the window on every one of
+            // those would make the frame flicker as the pointer crosses a radio button.
+            topHatBtn.addChangeListener(e -> {
+                if (topHatOptions.isVisible() != topHatBtn.isSelected()) {
+                    topHatOptions.setVisible(topHatBtn.isSelected());
+                    relayoutStep();
+                }
+            });
+            sgBtn.addChangeListener(e -> {
+                if (sgOptions.isVisible() != sgBtn.isSelected()) {
+                    sgOptions.setVisible(sgBtn.isSelected());
+                    relayoutStep();
+                }
+            });
         }
 
         @Override
@@ -1046,29 +1106,19 @@ public class TlcDigitizerFrame extends JFrame {
             gbc.insets = new Insets(0, 0, 0, 0);
             sliderRow.add(new JLabel("5×"), gbc);
 
-            legacyRadio = new JRadioButton(
-                "<html><body style='width:480px'><b>Legacy (mean threshold)</b> — " +
-                "threshold at image-mean intensity, integrate within a fixed circular radius " +
-                "<small style='color:gray'>(recommended — the only method validated against " +
-                "the reference plates)</small></body></html>");
-            shapeAwareRadio = new JRadioButton(
-                "<html><body style='width:480px'><b>Shape-aware detection (beta)</b> — " +
-                "hysteresis-link and integrate each spot's true connected shape instead of " +
-                "a fixed circle " +
-                "<small style='color:gray'>(better for streaking/tailing spots; " +
-                "not yet validated against the reference plates)</small></body></html>");
-            laneDetectionRadio = new JRadioButton(
-                "<html><body style='width:480px'><b>Lane detection (beta)</b> — " +
-                "assign spots to lanes using CWT-based lane-boundary detection instead of " +
-                "grouping by gaps between detected spots " +
-                "<small style='color:gray'>(can represent a genuinely empty lane; " +
-                "not yet validated against the reference plates)</small></body></html>");
-            labkitRadio = new JRadioButton(
-                "<html><body style='width:480px'><b>Advanced detection (Labkit, beta)</b> — " +
-                "train a pixel classifier from a few example regions instead of a single " +
-                "intensity threshold " +
-                "<small style='color:gray'>(better for faint spots and tailing lanes; " +
-                "not yet validated against the reference plates)</small></body></html>");
+            // Title on the radio, one line of description beneath it, validation status as a
+            // badge. Previously each option was a single wrapped paragraph ending in a grey
+            // parenthetical, and "not yet validated against the reference plates" appeared three
+            // times in a row -- accurate, but it made the panel's largest block of text a
+            // disclaimer, and buried what each method actually does.
+            legacyRadio        = new JRadioButton("Legacy (mean threshold)");
+            shapeAwareRadio    = new JRadioButton("Shape-aware detection");
+            laneDetectionRadio = new JRadioButton("Lane detection");
+            labkitRadio        = new JRadioButton("Advanced detection (Labkit)");
+            for (JRadioButton rb : new JRadioButton[]{
+                    legacyRadio, shapeAwareRadio, laneDetectionRadio, labkitRadio}) {
+                rb.setFont(Ui.bodyBold());
+            }
 
             ButtonGroup methodGroup = new ButtonGroup();
             methodGroup.add(legacyRadio);
@@ -1081,6 +1131,7 @@ public class TlcDigitizerFrame extends JFrame {
                 rb.setAlignmentX(LEFT_ALIGNMENT);
                 rb.addActionListener(e -> {
                     labkitPanel.setVisible(labkitRadio.isSelected());
+                    relayoutStep();
                     if (labkitRadio.isSelected()) {
                         // Hide the previous detection overlay while marking regions -- those
                         // old numbered circles don't reflect anything about the Labkit workflow
@@ -1108,14 +1159,22 @@ public class TlcDigitizerFrame extends JFrame {
             JPanel controls = new JPanel();
             controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
             controls.add(methodHeader);
-            controls.add(Box.createVerticalStrut(4));
-            controls.add(legacyRadio);
-            controls.add(Box.createVerticalStrut(6));
-            controls.add(shapeAwareRadio);
-            controls.add(Box.createVerticalStrut(6));
-            controls.add(laneDetectionRadio);
-            controls.add(Box.createVerticalStrut(6));
-            controls.add(labkitRadio);
+            controls.add(Box.createVerticalStrut(Ui.GAP_TIGHT));
+            controls.add(methodOption(legacyRadio, Ui.validatedBadge(),
+                "Threshold at image-mean intensity, integrate within a fixed circular radius. "
+                + "Recommended: the only method validated against the reference plates."));
+            controls.add(Box.createVerticalStrut(Ui.GAP));
+            controls.add(methodOption(shapeAwareRadio, Ui.betaBadge(),
+                "Hysteresis-link and integrate each spot's true connected shape instead of a "
+                + "fixed circle. Better for streaking or tailing spots."));
+            controls.add(Box.createVerticalStrut(Ui.GAP));
+            controls.add(methodOption(laneDetectionRadio, Ui.betaBadge(),
+                "Assign spots to lanes by CWT-based lane-boundary detection rather than by gaps "
+                + "between detected spots. Can represent a genuinely empty lane."));
+            controls.add(Box.createVerticalStrut(Ui.GAP));
+            controls.add(methodOption(labkitRadio, Ui.betaBadge(),
+                "Train a pixel classifier from a few marked example regions instead of using a "
+                + "single intensity threshold. Better for faint spots and tailing lanes."));
             controls.add(labkitPanel);
 
             // The method-selection area (not the threshold section below -- see the SOUTH
@@ -1147,6 +1206,28 @@ public class TlcDigitizerFrame extends JFrame {
             countLabel.setAlignmentX(LEFT_ALIGNMENT);
             footer.add(countLabel);
             add(footer, BorderLayout.SOUTH);
+        }
+
+        /**
+         * One detection method: radio title, status badge on the same row, description beneath.
+         * The description is indented to line up under the radio's text rather than its button,
+         * so the block reads as one option instead of two unrelated lines.
+         */
+        private JPanel methodOption(JRadioButton rb, JLabel badge, String description) {
+            JPanel row = new JPanel();
+            row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+            row.setAlignmentX(LEFT_ALIGNMENT);
+            row.add(rb);
+            row.add(Box.createHorizontalStrut(Ui.GAP_TIGHT));
+            row.add(badge);
+            row.add(Box.createHorizontalGlue());
+
+            JPanel block = new JPanel();
+            block.setLayout(new BoxLayout(block, BoxLayout.Y_AXIS));
+            block.setAlignmentX(LEFT_ALIGNMENT);
+            block.add(row);
+            block.add(Ui.caption(description, 22));
+            return block;
         }
 
         @Override
@@ -1855,9 +1936,10 @@ public class TlcDigitizerFrame extends JFrame {
             liveRow.add(liveR2Label, BorderLayout.CENTER);
             liveRow.add(optimizeBtn, BorderLayout.EAST);
 
-            calResultsLabel = new JLabel(
-                "<html><body style='width:480px;color:gray;font-style:italic'>" +
-                "Calibration results will appear here after clicking Next.</body></html>");
+            // Empty and hidden until there is an actual result. A permanent
+            // "results will appear here after clicking Next" placeholder occupied real estate
+            // to say nothing, and read as an unfinished panel in every screenshot of this step.
+            calResultsLabel = new JLabel();
             calResultsLabel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, Color.LIGHT_GRAY),
                 BorderFactory.createEmptyBorder(5, 4, 5, 4)));
@@ -1920,13 +2002,7 @@ public class TlcDigitizerFrame extends JFrame {
             }
 
             // Restore results strip if model was already fitted (back-navigation)
-            if (state.calibrationModel != null) {
-                calResultsLabel.setText(buildCalibResultsHtml(state.calibrationModel));
-            } else {
-                calResultsLabel.setText(
-                    "<html><body style='width:480px;color:gray;font-style:italic'>" +
-                    "Calibration results will appear here after clicking Next.</body></html>");
-            }
+            showCalibrationResults(state.calibrationModel);
 
             setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 6 · Calibrate");
             Overlay ov = new Overlay();
@@ -2188,7 +2264,7 @@ public class TlcDigitizerFrame extends JFrame {
                 IJ.log("[Step 6] " + state.calibrationModel.toSummary());
 
                 // Show calibration quality summary before advancing to Step 7
-                calResultsLabel.setText(buildCalibResultsHtml(state.calibrationModel));
+                showCalibrationResults(state.calibrationModel);
                 JOptionPane.showMessageDialog(
                     TlcDigitizerFrame.this,
                     buildCalibResultsHtml(state.calibrationModel),
@@ -2199,6 +2275,12 @@ public class TlcDigitizerFrame extends JFrame {
                 return false;
             }
             return true;
+        }
+
+        /** Shows the fitted-model summary, or nothing at all when there is no model yet. */
+        private void showCalibrationResults(CalibrationModel m) {
+            calResultsLabel.setText(m != null ? buildCalibResultsHtml(m) : "");
+            calResultsLabel.setVisible(m != null);
         }
 
         private String buildCalibResultsHtml(CalibrationModel m) {

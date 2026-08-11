@@ -95,6 +95,33 @@ public class Img00451DetectionRegressionTest {
             {0.729817f, 0.545044f},
     };
 
+    /**
+     * {@code radius_fraction} per spot, from the same CSV, in the same order as
+     * {@link #EXPECTED_SPOTS}.
+     *
+     * <p><b>Why this exists.</b> Position matching alone passes even when the fitted circles are
+     * visibly wrong -- during a 2026-08-11 screenshot session the detector produced grossly
+     * oversized, mutually overlapping circles at these exact parameters and every position
+     * assertion still passed, because radius was never checked. These values were then measured
+     * from a fresh run and found to be bit-identical to the CSV's, confirming the recorded
+     * fixture is the detector's own untouched output rather than a hand-corrected one, and that
+     * nothing had drifted.
+     *
+     * <p>So this is a characterisation assertion: it pins what the detector currently does, not
+     * what it ideally should do. Spots 4 and 8 (r ≈ 0.058) genuinely do overlap their
+     * neighbours -- that is a real, open weakness of fixed-circle legacy detection on streaking
+     * lanes, not something this test endorses. If a future change improves those radii, this
+     * test SHOULD fail, and the fixture should be re-recorded deliberately.
+     */
+    private static final float[] EXPECTED_RADII = {
+            0.024476f, 0.058251f, 0.028752f, 0.024156f,
+            0.040936f, 0.040402f, 0.043181f, 0.058358f,
+    };
+
+    /** Radius agreement, relative. Tight (2%) on purpose: radii were verified to reproduce
+     * exactly, so any real movement here is a genuine behaviour change worth failing on. */
+    private static final float RADIUS_TOLERANCE_RELATIVE = 0.02f;
+
     /** Match tolerance as a fraction of image width/height -- generous (3%) since this is a
      * regression guard against gross pipeline changes, not a precision check. */
     private static final float MATCH_TOLERANCE_FRACTION = 0.03f;
@@ -191,6 +218,49 @@ public class Img00451DetectionRegressionTest {
                 + "img_00451 within " + (MATCH_TOLERANCE_FRACTION * 100) + "% tolerance. Misses:\n"
                 + String.join("\n", result.misses) + "\nDetected " + detected.size() + " spots total.",
                 result.misses.isEmpty());
+    }
+
+    /**
+     * Pins the fitted circle radii, not just the centroids.
+     *
+     * <p>Positions alone are not enough: the same detection run can place all 8 centroids
+     * correctly while sizing their circles badly enough to swallow neighbouring spots, and the
+     * position-only assertions above pass regardless. See {@link #EXPECTED_RADII} for how that
+     * gap was found and why these particular numbers are trustworthy as a baseline.
+     */
+    @Test
+    public void legacyDetection_radiiMatchTheRecordedFixture() {
+        Assume.assumeTrue("Skipping: img_00451 source photo not present at " + IMAGE_PATH,
+                detectionImage != null);
+
+        List<Spot> detected = SpotDetector.detect(detectionImage, THRESHOLD_FACTOR, false,
+                ORIGIN_Y_FRACTION, FRONT_Y_FRACTION);
+        float maxDim = Math.max(width, height);
+        float tolPx = MATCH_TOLERANCE_FRACTION * maxDim;
+
+        for (int i = 0; i < EXPECTED_SPOTS.length; i++) {
+            float tx = EXPECTED_SPOTS[i][0] * width, ty = EXPECTED_SPOTS[i][1] * height;
+            Spot nearest = null;
+            float bestD = Float.MAX_VALUE;
+            for (Spot s : detected) {
+                float dx = s.centroidX - tx, dy = s.centroidY - ty;
+                float d = (float) Math.sqrt(dx * dx + dy * dy);
+                if (d < bestD) { bestD = d; nearest = s; }
+            }
+            assertTrue(String.format(
+                    "No detection near expected spot %d at (%.3f, %.3f); nearest was %.1fpx away",
+                    i + 1, EXPECTED_SPOTS[i][0], EXPECTED_SPOTS[i][1], bestD),
+                    nearest != null && bestD <= tolPx);
+
+            float actual = nearest.radius / maxDim;
+            float expected = EXPECTED_RADII[i];
+            assertEquals(String.format(
+                    "Spot %d radius drifted from the recorded fixture (expected %.6f, got %.6f "
+                    + "as a fraction of the image's longest side). If this change is intended, "
+                    + "re-record EXPECTED_RADII deliberately rather than widening the tolerance.",
+                    i + 1, expected, actual),
+                    expected, actual, expected * RADIUS_TOLERANCE_RELATIVE);
+        }
     }
 
     /**
