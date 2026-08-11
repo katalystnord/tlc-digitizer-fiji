@@ -35,3 +35,8 @@ validation/**/*.csv
 
 # Claude Code local session state — permissions/lock files, not project config
 .claude/
+
+# Internal working notes — detailed engineering log kept locally as Claude
+# context. Not part of the published project.
+CLAUDE.md
+CLAUDE-tlc.md

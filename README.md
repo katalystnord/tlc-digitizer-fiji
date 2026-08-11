@@ -42,7 +42,7 @@ three are opt-in, off by default, and explicitly labelled beta in the UI:
 | **Legacy (mean threshold)** | Fixed circular ROI at image-mean threshold (above) | **Validated** — recommended |
 | **Shape-aware detection** | Hysteresis-linking + watershed peak separation; integrates each spot's true connected shape instead of a fixed circle — better for streaking/tailing spots | Beta — not yet validated |
 | **Lane detection** | CWT-based lane-boundary detection on the column intensity profile, assigning spots to lanes independent of spot detection (can represent a genuinely empty lane) | Beta — known gap on irregular/non-periodic real layouts |
-| **Advanced detection (Labkit)** | Random-forest pixel classifier (via [Labkit](https://imagej.net/plugins/labkit)) trained from a handful of user-marked example regions per image — better for faint spots and tailing lanes | Beta — detection geometry is validated (5/5 spots, zero false positives on all three reference plates); quantification is close to the legacy benchmark once background method and pipeline settings are matched — see project history for the full writeup |
+| **Advanced detection (Labkit)** | Random-forest pixel classifier (via [Labkit](https://imagej.net/plugins/labkit)) trained from a handful of user-marked example regions per image — better for faint spots and tailing lanes | Beta — detection geometry is validated (5/5 spots, zero false positives on all three reference plates); quantification is close to the legacy benchmark once the background method and pipeline settings are matched to those used for legacy (a background-method mismatch, not the classifier, accounted for most of the gap seen in early testing) |
 
 ### Key references
 
@@ -191,18 +191,6 @@ src/
 
 ---
 
-## Relationship to TLC Flow
-
-TLC Digitizer is the **research and validation phase** of a planned cross-platform application (TLC Flow). Once this plugin achieves the validation targets above and is published:
-
-- The validated algorithm becomes the specification for TLC Flow's computation core
-- The real-world failure modes discovered here inform TLC Flow's UX
-- The methods paper provides scientific citeability at launch
-
-Do not design TLC Digitizer to be "compatible with TLC Flow". Design it to be correct.
-
----
-
 ## Dependencies
 
 All runtime dependencies are bundled with Fiji:
@@ -212,7 +200,7 @@ All runtime dependencies are bundled with Fiji:
 | ImageJ (ij) | 1.54+ | Public domain | Core image processing |
 | mpicbg | 1.6.0 | GPL-2.0 | Perspective homography |
 | Apache Commons Math 3 | 3.6.1 | Apache-2.0 | OLS regression, polynomial fitting |
-| Labkit (`labkit-pixel-classification`) + imglib2 family | pinned to Fiji's exact bundled versions | BSD-2-Clause / BSD | Beta "Advanced detection" (opt-in, off by default) — version-pinned deliberately, see project history for why a Maven-resolved version mismatch against Fiji's bundled jars breaks at runtime despite compiling cleanly |
+| Labkit (`labkit-pixel-classification`) + imglib2 family | pinned to Fiji's exact bundled versions | BSD-2-Clause / BSD | Beta "Advanced detection" (opt-in, off by default) — pinned deliberately: Maven's resolved versions can differ from what a given Fiji install actually bundles, and an imglib2 return-type change is enough to throw `NoSuchMethodError` at runtime while still compiling cleanly. Check the versions in your Fiji's `jars/` directory before changing these pins |
 
 ---
 
