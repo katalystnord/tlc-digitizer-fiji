@@ -94,9 +94,9 @@ public final class CalibrationModel {
 
     public final double rSquared;
 
-    /** ICH Q2(R1) LOD = 3.3σ/slope. NaN for non-LINEAR models. */
+    /** ICH Q2(R1) LOD, in concentration units. NaN for non-LINEAR models. */
     public final double lod;
-    /** ICH Q2(R1) LOQ = 10σ/slope. NaN for non-LINEAR models. */
+    /** ICH Q2(R1) LOQ, in concentration units. NaN for non-LINEAR models. */
     public final double loq;
 
     /** Root-mean-square error in concentration units. Available for all models. */
@@ -214,16 +214,23 @@ public final class CalibrationModel {
         double newLod, newLoq;
         switch (convention) {
             case REGRESSION_ICH:
-                newLod = (slope != 0) ? 3.3  * sigmaRegression / Math.abs(slope) : Double.NaN;
-                newLoq = (slope != 0) ? 10.0 * sigmaRegression / Math.abs(slope) : Double.NaN;
+                // ICH Q2(R1) states LOD = 3.3σ/S for a calibration fitted as
+                // response = S × concentration. This model is fitted the other way round
+                // (concentration = slope × signal), so σ is ALREADY in concentration units
+                // and the slope conversion is already built in. Dividing by the slope again
+                // would return the answer in signal units — see the unit tests.
+                newLod = 3.3  * sigmaRegression;
+                newLoq = 10.0 * sigmaRegression;
                 break;
             case SIGNAL_NOISE:
-                if (Double.isNaN(bgSigma) || slope == 0) {
+                if (Double.isNaN(bgSigma)) {
                     newLod = Double.NaN;
                     newLoq = Double.NaN;
                 } else {
-                    newLod = 3.0  * bgSigma / Math.abs(slope);
-                    newLoq = 10.0 * bgSigma / Math.abs(slope);
+                    // bgSigma is a background sigma in SIGNAL units, so converting it to a
+                    // concentration means MULTIPLYING by slope (concentration per signal).
+                    newLod = 3.0  * bgSigma * Math.abs(slope);
+                    newLoq = 10.0 * bgSigma * Math.abs(slope);
                 }
                 break;
             case MANUAL:
@@ -326,8 +333,10 @@ public final class CalibrationModel {
         double intercept = reg.getIntercept();
         double r2        = reg.getRSquare();
         double sigma     = reg.getMeanSquareError() > 0 ? Math.sqrt(reg.getMeanSquareError()) : 0;
-        double lod       = (slope != 0) ? 3.3  * sigma / Math.abs(slope) : Double.NaN;
-        double loq       = (slope != 0) ? 10.0 * sigma / Math.abs(slope) : Double.NaN;
+        // σ is in concentration units because the regression is fitted as
+        // concentration = slope × signal; see withLodLoqConvention for the full note.
+        double lod       = 3.3  * sigma;
+        double loq       = 10.0 * sigma;
         double rmse      = computeRmse(refs, intercept, slope, 2, ModelType.LINEAR);
         return new CalibrationModel(ModelType.LINEAR, new double[]{intercept, slope},
                                     r2, lod, loq, rmse, (int) reg.getN(),

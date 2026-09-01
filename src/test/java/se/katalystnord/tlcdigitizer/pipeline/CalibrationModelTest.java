@@ -145,10 +145,72 @@ public class CalibrationModelTest {
                 CalibrationModel.LodLoqConvention.SIGNAL_NOISE, bgSigma, 0, 0);
 
         assertEquals(CalibrationModel.LodLoqConvention.SIGNAL_NOISE, sn.lodLoqConvention);
-        // LOD = 3 * sigma / |slope|; LOQ = 10 * sigma / |slope|
-        assertEquals("LOD from S/N", 3.0 * bgSigma / Math.abs(m.slope), sn.lod, 0.01);
-        assertEquals("LOQ from S/N", 10.0 * bgSigma / Math.abs(m.slope), sn.loq, 0.01);
+        // bgSigma is a background sigma in SIGNAL units; converting it to a concentration
+        // means multiplying by the slope (concentration per signal), not dividing.
+        // Corrected 2026-09-01 — the previous expectation divided, which returned a value
+        // in signal²/concentration units.
+        assertEquals("LOD from S/N", 3.0 * bgSigma * Math.abs(m.slope), sn.lod, 0.01);
+        assertEquals("LOQ from S/N", 10.0 * bgSigma * Math.abs(m.slope), sn.loq, 0.01);
         assertTrue("LOQ >= LOD", sn.loq >= sn.lod);
+    }
+
+    // -------------------------------------------------------------------------
+    // LOD/LOQ units. The model is fitted as concentration = slope × signal, the
+    // inverse of ICH Q2(R1)'s response = S × concentration, so σ is already in
+    // concentration units and must NOT be divided by the slope again.
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void lod_isThreePointThreeSigmaInConcentrationUnits() {
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(1, 1000, 10));
+        refs.add(makeRef(2, 1500, 15));
+        refs.add(makeRef(3, 2000, 21));   // slight scatter so sigma > 0
+        CalibrationModel m = CalibrationModel.fit(refs);
+
+        assertEquals("LOD must be 3.3σ in concentration units",
+                     3.3 * m.sigmaRegression, m.lod, 1e-9);
+        assertEquals("LOQ must be 10σ in concentration units",
+                     10.0 * m.sigmaRegression, m.loq, 1e-9);
+    }
+
+    @Test
+    public void lodLoq_areInvariantToTheSignalScale() {
+        // The decisive dimensional check. Same concentrations, integration values scaled
+        // by 1000: LOD expressed in concentration units cannot change. Under the previous
+        // `3.3σ/slope` formula it scaled with the signal, off by exactly this factor —
+        // which is how LOD came out as 4.776e4 against a 60–100 calibration.
+        List<Spot> small = new ArrayList<>();
+        small.add(makeRef(1, 1000, 10));
+        small.add(makeRef(2, 1500, 15));
+        small.add(makeRef(3, 2000, 21));
+
+        List<Spot> large = new ArrayList<>();
+        large.add(makeRef(1, 1_000_000, 10));
+        large.add(makeRef(2, 1_500_000, 15));
+        large.add(makeRef(3, 2_000_000, 21));
+
+        CalibrationModel a = CalibrationModel.fit(small);
+        CalibrationModel b = CalibrationModel.fit(large);
+
+        assertEquals("LOD must not depend on the units of the integration value",
+                     a.lod, b.lod, 1e-6);
+        assertEquals("LOQ must not depend on the units of the integration value",
+                     a.loq, b.loq, 1e-6);
+    }
+
+    @Test
+    public void lod_staysOnTheSameScaleAsTheCalibrationRange() {
+        // Sanity a chemist would apply: an LOD for a 10–20 µg/mL calibration belongs
+        // somewhere near that range, not orders of magnitude above it.
+        List<Spot> refs = new ArrayList<>();
+        refs.add(makeRef(1, 1000, 10));
+        refs.add(makeRef(2, 1500, 15));
+        refs.add(makeRef(3, 2000, 21));
+        CalibrationModel m = CalibrationModel.fit(refs);
+
+        assertTrue("LOD (" + m.lod + ") should be within an order of magnitude of the "
+                   + "calibration range, not in signal units", m.lod < 200.0);
     }
 
     @Test
