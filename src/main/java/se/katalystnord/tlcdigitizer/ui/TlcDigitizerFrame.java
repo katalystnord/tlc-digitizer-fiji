@@ -485,12 +485,20 @@ public class TlcDigitizerFrame extends JFrame {
 
         @Override
         boolean commit() {
+            // Two colour spaces, one source: raw sRGB drives detection and background
+            // correction (the quartic fits the lamp gradient there), linear light is the
+            // integration base (pixel value proportional to intensity). See
+            // ImagePreparation.toLuminanceGrayscale(ImagePlus, boolean).
             FloatProcessor fp = greenBtn.isSelected()
-                ? ImagePreparation.extractGreenChannel(state.originalImage)
-                : ImagePreparation.toLuminanceGrayscale(state.originalImage);
+                ? ImagePreparation.extractGreenChannel(state.originalImage, false)
+                : ImagePreparation.toLuminanceGrayscale(state.originalImage, false);
+            FloatProcessor fpLinear = greenBtn.isSelected()
+                ? ImagePreparation.extractGreenChannel(state.originalImage, true)
+                : ImagePreparation.toLuminanceGrayscale(state.originalImage, true);
             state.invertImage = invertBox.isSelected();
-            if (state.invertImage) fp.invert();
+            if (state.invertImage) { fp.invert(); fpLinear.invert(); }
             state.grayscale = fp;
+            state.grayscaleLinear = fpLinear;
             IJ.log("[Step 1] Greyscale: " + (greenBtn.isSelected() ? "green channel" : "luminance")
                 + (state.invertImage ? " (inverted)" : ""));
             return true;
@@ -684,6 +692,9 @@ public class TlcDigitizerFrame extends JFrame {
             spinnersToCorners();
             state.corrected     = PerspectiveCorrection.warpImage(state.grayscale, state.corners);
             state.perspCorrected = state.corrected; // snapshot pre-background for step 3 re-entry
+            state.perspCorrectedLinear = (state.grayscaleLinear != null)
+                ? PerspectiveCorrection.warpImage(state.grayscaleLinear, state.corners)
+                : null;
             setDisplay(state.corrected.duplicate(), "TLC Digitizer — Step 2 · Perspective corrected");
             IJ.log("[Step 2] Perspective warp: "
                 + state.corrected.getWidth() + "×" + state.corrected.getHeight());
@@ -1745,12 +1756,17 @@ public class TlcDigitizerFrame extends JFrame {
                 LaneAssigner.assignLanes(state.spots, state.corrected.getWidth());
             }
             RfCalculator.assignAll(state.spots, state.originYFraction, state.frontYFraction);
-            SpotIntegrator.integrateAll(state.corrected, state.spots);
+            // Integration base mirrors ValidationRunner: top-hat integrates the corrected
+            // image (background already removed); every other mode integrates the
+            // linear-light warped image plus a per-spot local background correction, so
+            // that the global quartic only ever influences detection, never the values.
+            FloatProcessor integrationBase = state.integrationBase();
+            SpotIntegrator.integrateAll(integrationBase, state.spots);
 
-            if (!state.usedPolynomialBackground && !state.usedTopHatBackground) {
+            if (!state.usedTopHatBackground) {
                 IJ.showStatus("Applying per-spot polynomial background…");
                 BackgroundCorrection.applyPerSpotPolynomial(
-                    state.spots, state.corrected, state.sgDegree);
+                    state.spots, integrationBase, state.sgDegree);
                 IJ.showStatus("");
             }
 
@@ -2132,10 +2148,18 @@ public class TlcDigitizerFrame extends JFrame {
                             (float)(orig.radius * scale), imgH);
                     temp.isReference = true;
                     temp.referenceConcentration = conc;
-                    SpotIntegrator.integrate(state.corrected, temp);
+                    SpotIntegrator.integrate(state.integrationBase(), temp);
                     tempRefs.add(temp);
                 }
                 if (tempRefs.size() < 3) continue;
+                // The integration base carries its own background for every non-top-hat
+                // mode, so the per-spot local correction must run here too or the R2 is
+                // computed on values inflated by a background offset. Mirrors
+                // ValidationRunner's grid search.
+                if (!state.usedTopHatBackground) {
+                    BackgroundCorrection.applyPerSpotPolynomial(
+                        tempRefs, state.integrationBase(), state.sgDegree);
+                }
                 try {
                     double r2 = CalibrationModel.fit(tempRefs, mt).rSquared;
                     r2ByScale.put(scale, r2);
@@ -2180,8 +2204,12 @@ public class TlcDigitizerFrame extends JFrame {
                 scaled.lane                 = s.lane;
                 scaled.isReference          = s.isReference;
                 scaled.referenceConcentration = s.referenceConcentration;
-                SpotIntegrator.integrate(state.corrected, scaled);
+                SpotIntegrator.integrate(state.integrationBase(), scaled);
                 newSpots.add(scaled);
+            }
+            if (!state.usedTopHatBackground) {
+                BackgroundCorrection.applyPerSpotPolynomial(
+                    newSpots, state.integrationBase(), state.sgDegree);
             }
             state.spots = newSpots;
 

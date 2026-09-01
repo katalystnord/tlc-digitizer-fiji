@@ -114,12 +114,19 @@ public class Img00451DetectionRegressionTest {
      * test SHOULD fail, and the fixture should be re-recorded deliberately.
      */
     private static final float[] EXPECTED_RADII = {
-            0.024476f, 0.058251f, 0.028752f, 0.024156f,
-            0.040936f, 0.040402f, 0.043181f, 0.058358f,
+            0.021697f, 0.054083f, 0.025759f, 0.018491f,
+            0.034096f, 0.035165f, 0.028752f, 0.055472f,
     };
 
     /** Radius agreement, relative. Tight (2%) on purpose: radii were verified to reproduce
-     * exactly, so any real movement here is a genuine behaviour change worth failing on. */
+     * exactly, so any real movement here is a genuine behaviour change worth failing on.
+     *
+     * <p>Re-recorded 2026-09-01 when detection moved to raw sRGB (see CLAUDE.md, "Colour
+     * space -- two images, not one"). Every radius shrank -- 0.0245/0.0583/0.0288/0.0242/
+     * 0.0409/0.0404/0.0432/0.0584 previously -- because the quartic background fit no
+     * longer leaves a residual gradient inflating the thresholded regions. All 8 spot
+     * POSITIONS were unaffected by the change, and this is still a characterisation test:
+     * it pins what the detector does, not what it should do. */
     private static final float RADIUS_TOLERANCE_RELATIVE = 0.02f;
 
     /** Match tolerance as a fraction of image width/height -- generous (3%) since this is a
@@ -141,7 +148,9 @@ public class Img00451DetectionRegressionTest {
         BufferedImage bi = ImageIO.read(IMAGE_PATH.toFile());
         ImagePlus imp = new ImagePlus("img_00451", bi);
 
-        FloatProcessor gray = ImagePreparation.extractGreenChannel(imp);
+        // Raw sRGB, matching the shipping detection path. The 1-arg overload linearises
+        // and would pin a colour space the product no longer detects in.
+        FloatProcessor gray = ImagePreparation.extractGreenChannel(imp, false);
         if (INVERT_IMAGE) {
             float[] px = (float[]) gray.getPixels();
             for (int i = 0; i < px.length; i++) px[i] = 255.0f - px[i];

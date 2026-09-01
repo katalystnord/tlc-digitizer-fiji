@@ -17,8 +17,18 @@ public class AnalysisState {
     /** The original image as opened in Fiji. */
     public ImagePlus originalImage;
 
-    /** Grayscale representation after Stage 1 (luminance or green channel). */
+    /** Grayscale representation after Stage 1 (luminance or green channel), in RAW sRGB.
+     *  This is the detection/background-correction image. */
     public FloatProcessor grayscale;
+
+    /**
+     * The same Stage 1 grayscale in LINEAR light (sRGB inverse transfer function applied).
+     * Used only as the integration base, so that integration values are proportional to
+     * light intensity while the quartic background model still sees the encoded gradient
+     * it can actually fit. See {@code ImagePreparation.toLuminanceGrayscale(ImagePlus,
+     * boolean)} for the rationale and measured effect.
+     */
+    public FloatProcessor grayscaleLinear;
 
     /**
      * Four corner points [tlX, tlY, trX, trY, brX, brY, blX, blY] in the
@@ -54,6 +64,28 @@ public class AnalysisState {
      * correction can be re-run cleanly on Back navigation.
      */
     public FloatProcessor perspCorrected;
+
+    /**
+     * Perspective-corrected LINEAR-light image, before background subtraction.
+     * The integration base for polynomial / Savitzky-Golay modes, mirroring
+     * {@code ValidationRunner}'s {@code integrationBase}.
+     */
+    public FloatProcessor perspCorrectedLinear;
+
+    /**
+     * The image spot integration should read, mirroring {@code ValidationRunner}.
+     *
+     * <p>Top-hat mode integrates {@link #corrected} directly: its background is already
+     * removed and there is no global surface to over-subtract. Every other mode
+     * integrates the linear-light perspective-corrected image ({@link
+     * #perspCorrectedLinear}), so integration values are proportional to light intensity
+     * and the global quartic influences detection only. Falls back to {@link #corrected}
+     * if the linear image is unavailable (e.g. grayscale input).
+     */
+    public FloatProcessor integrationBase() {
+        if (usedTopHatBackground || perspCorrectedLinear == null) return corrected;
+        return perspCorrectedLinear;
+    }
 
     /** True when the plate has dark spots on a bright background (staining, UV 254 nm). */
     public boolean invertImage = false;

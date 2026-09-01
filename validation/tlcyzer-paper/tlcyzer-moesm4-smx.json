@@ -41,7 +41,7 @@
   "usePolynomialBackground": true,
   "useTopHatBackground": false,
   "topHatSeRadius": 152.25,
-  "_thresholdNote": "2026-07-19: switched to polynomial background -- threshold=1.0 -> 5/5 SMX spots auto-detected (matches the interactive re-test that motivated this change).",
+  "_thresholdNote": "2026-07-19: switched to polynomial background -- threshold=1.0 -> 5/5 SMX spots auto-detected (matches the interactive re-test that motivated this change). | 2026-09-01: threshold unified to 1.0 (the plain image mean) across all fixtures; was 1.0. The per-plate values existed to work around a residual illumination gradient left by fitting the quartic background in linearised sRGB. Detection now runs on raw sRGB and integration on linear light (CLAUDE.md, 'Colour space — two images, not one'), so all three plates auto-detect 5/5 at the plain mean and per-plate threshold tuning is no longer needed. Any reasoning above about threshold sensitivity is superseded.",
   "thresholdFactor": 1.0,
 
   "_cornerNote": "Landscape-space corners, converted from portrait CSV export (see _notes).",

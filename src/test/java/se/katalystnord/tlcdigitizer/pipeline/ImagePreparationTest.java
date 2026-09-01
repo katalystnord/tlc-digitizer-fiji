@@ -92,4 +92,48 @@ public class ImagePreparationTest {
         FloatProcessor fp = ImagePreparation.extractGreenChannel(makeRgb(255, 0, 255));
         assertEquals(0.0f, fp.getf(5, 5), 0.01f);
     }
+
+    // -------------------------------------------------------------------------
+    // Raw sRGB path (linearise = false) — the detection/background colour space.
+    // See ImagePreparation.toLuminanceGrayscale(ImagePlus, boolean) for why the
+    // pipeline needs both spaces, and CLAUDE.md "Colour space — two images, not one".
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void greenChannel_rawKeepsTheEncodedValue() {
+        FloatProcessor fp = ImagePreparation.extractGreenChannel(makeRgb(0, 200, 0), false);
+        assertEquals("Raw sRGB must pass the encoded channel value through untouched",
+                     200f, fp.getf(5, 5), 0.01f);
+    }
+
+    @Test
+    public void greenChannel_rawAndLinearDivergeInTheShadows() {
+        // The two spaces must not be interchangeable: a mid-dark value is where the
+        // 2.4-power transfer function bites hardest, and it is exactly that distortion
+        // that stops the Stage 3 quartic from flattening a lamp gradient.
+        FloatProcessor raw    = ImagePreparation.extractGreenChannel(makeRgb(0, 64, 0), false);
+        FloatProcessor linear = ImagePreparation.extractGreenChannel(makeRgb(0, 64, 0), true);
+        assertEquals(64f, raw.getf(5, 5), 0.01f);
+        assertTrue("Linearised sRGB 64 should fall well below the encoded value; got "
+                   + linear.getf(5, 5), linear.getf(5, 5) < 20f);
+    }
+
+    @Test
+    public void luminance_rawUsesEncodedChannelsButTheSameWeights() {
+        // Pure red, encoded: 0.2126 * 255, with no transfer function applied.
+        FloatProcessor fp = ImagePreparation.toLuminanceGrayscale(makeRgb(255, 0, 0), false);
+        assertEquals(0.2126f * 255f, fp.getf(5, 5), 1.0f);
+        // Neutral 127 stays near 127 in raw sRGB, where the linearised path gives ~54.
+        FloatProcessor mid = ImagePreparation.toLuminanceGrayscale(makeRgb(127, 127, 127), false);
+        assertEquals(127f, mid.getf(5, 5), 1.0f);
+    }
+
+    @Test
+    public void singleArgOverloadsStillLinearise() {
+        // The 1-arg forms are kept for compatibility and must not silently change space.
+        assertEquals(ImagePreparation.extractGreenChannel(makeRgb(0, 200, 0), true).getf(5, 5),
+                     ImagePreparation.extractGreenChannel(makeRgb(0, 200, 0)).getf(5, 5), 0.001f);
+        assertEquals(ImagePreparation.toLuminanceGrayscale(makeRgb(127, 127, 127), true).getf(5, 5),
+                     ImagePreparation.toLuminanceGrayscale(makeRgb(127, 127, 127)).getf(5, 5), 0.001f);
+    }
 }

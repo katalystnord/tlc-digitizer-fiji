@@ -144,15 +144,21 @@ Two additional, larger-scale test tiers:
   ```sh
   ./mvnw test -Dtest=ValidationTest -Dvalidation.data.dir=/path/to/tlcyzer-paper
   ```
-  Current benchmark (legacy detection): overall n=15, mean recovery 97.56%, RSD 12.67% — inside the
-  TLCyzer paper's own 96.8–103.9% recovery band. See the fixture JSONs under `validation/tlcyzer-paper/`.
+  Current benchmark (legacy detection): overall n=15, mean recovery 100.77%, RSD 6.33% — inside the
+  TLCyzer paper's own 96.8–103.9% recovery band. Every plate uses the same settings: polynomial
+  background and the plain image mean as the detection threshold. See the fixture JSONs under
+  `validation/tlcyzer-paper/`.
 
-  | Plate | Mean recovery | RSD | Background method |
-  |-------|----------------|-----|---------------------|
-  | MOESM2 | 101.1% | 4.71% | polynomial |
-  | MOESM3 (HCT) | 92.12% | 22.76% | polynomial, threshold 0.80 |
-  | MOESM4 (SMX) | 99.42% | 3.94% | polynomial, threshold 1.0 |
-  | **Overall (n=15)** | **97.56%** | **12.67%** | |
+  | Plate | Mean recovery | RSD | Spots auto-detected |
+  |-------|----------------|-----|----------------------|
+  | MOESM2 | 100.86% | 7.34% | 5 / 5 |
+  | MOESM3 (HCT) | 98.96% | 5.74% | 5 / 5 |
+  | MOESM4 (SMX) | 102.49% | 6.73% | 5 / 5 |
+  | **Overall (n=15)** | **100.77%** | **6.33%** | |
+
+  This is a leave-one-out recovery RSD across concentration levels, which is **not** the same
+  quantity as the ICH repeatability RSD quoted in the targets table above (that needs replicate
+  analyses, which three photographs cannot provide). The two are not directly comparable.
 
 ---
 

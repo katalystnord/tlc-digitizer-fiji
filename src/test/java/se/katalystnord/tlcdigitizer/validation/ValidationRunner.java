@@ -163,17 +163,28 @@ public final class ValidationRunner {
         ImagePlus imp = new ImagePlus("validation", bi);
 
         // ----- Stage 1: grayscale conversion ---------------------------------
+        // Two grayscale images are built from the same source, in two colour spaces.
+        // Detection and background correction run on raw sRGB, where the lamp gradient
+        // is quartic-shaped; integration runs on linear light, where pixel value is
+        // proportional to intensity. See ImagePreparation.toLuminanceGrayscale(imp,
+        // boolean) for the full rationale and the measured effect.
         FloatProcessor gray = fixture.useGreenChannel
-                ? ImagePreparation.extractGreenChannel(imp)
-                : ImagePreparation.toLuminanceGrayscale(imp);
+                ? ImagePreparation.extractGreenChannel(imp, false)
+                : ImagePreparation.toLuminanceGrayscale(imp, false);
+        FloatProcessor grayLinear = fixture.useGreenChannel
+                ? ImagePreparation.extractGreenChannel(imp, true)
+                : ImagePreparation.toLuminanceGrayscale(imp, true);
 
         if (fixture.invertImage) {
             float[] px = (float[]) gray.getPixels();
             for (int i = 0; i < px.length; i++) px[i] = 255.0f - px[i];
+            float[] lpx = (float[]) grayLinear.getPixels();
+            for (int i = 0; i < lpx.length; i++) lpx[i] = 255.0f - lpx[i];
         }
 
         // ----- Stage 2: perspective warp (uses fixture corners directly) -----
         FloatProcessor warped = PerspectiveCorrection.warpImage(gray, fixture.corners);
+        FloatProcessor warpedLinear = PerspectiveCorrection.warpImage(grayLinear, fixture.corners);
 
         // ----- Stage 3: background correction --------------------------------
         FloatProcessor corrected;
@@ -199,9 +210,10 @@ public final class ValidationRunner {
 
         // For top-hat mode, integrate on the corrected (top-hat) image — the background
         // is already removed and there is no polynomial over-subtraction to avoid.
-        // For polynomial / S-G modes, integrate on the raw warped image so that the
-        // polynomial over-subtraction at off-centre positions does not corrupt integrals.
-        FloatProcessor integrationBase = fixture.useTopHatBackground ? corrected : warped;
+        // For polynomial / S-G modes, integrate on the linear-light warped image so that
+        // the polynomial over-subtraction at off-centre positions does not corrupt
+        // integrals, and so that integration values are proportional to light intensity.
+        FloatProcessor integrationBase = fixture.useTopHatBackground ? corrected : warpedLinear;
 
         int corrW = corrected.getWidth();
         int corrH = corrected.getHeight();

@@ -20,8 +20,8 @@
   "invertImage": true,
   "useGreenChannel": true,
   "usePolynomialBackground": true,
-  "_thresholdNote": "3.13 was used in interactive run; runner uses polynomial + per-spot S-G.",
-  "thresholdFactor": 3.13,
+  "_thresholdNote": "3.13 was used in interactive run; runner uses polynomial + per-spot S-G. | 2026-09-01: threshold unified to 1.0 (the plain image mean) across all fixtures; was 3.13. The per-plate values existed to work around a residual illumination gradient left by fitting the quartic background in linearised sRGB. Detection now runs on raw sRGB and integration on linear light (CLAUDE.md, 'Colour space — two images, not one'), so all three plates auto-detect 5/5 at the plain mean and per-plate threshold tuning is no longer needed. Any reasoning above about threshold sensitivity is superseded.",
+  "thresholdFactor": 1.0,
 
   "_cornerNote": "Landscape corners converted from plugin portrait coords (EXIF 90°-CW): lx=py, ly=1948-px.",
   "corners": [920.5, 1591.5, 935.5, 88.5, 3977.5, 100.5, 3971.5, 1603.5],

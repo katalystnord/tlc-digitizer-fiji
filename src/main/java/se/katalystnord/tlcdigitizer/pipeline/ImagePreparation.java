@@ -55,14 +55,52 @@ public final class ImagePreparation {
     }
 
     /**
-     * Converts {@code imp} to grayscale using the ITU-R BT.709 luminance formula.
-     * Handles RGB, RGBA, 8-bit gray, and 16-bit gray input.
+     * Converts {@code imp} to grayscale using the ITU-R BT.709 luminance formula,
+     * linearising sRGB first. Equivalent to {@code toLuminanceGrayscale(imp, true)}.
+     *
+     * @see #toLuminanceGrayscale(ImagePlus, boolean) for why the choice matters
      */
     public static FloatProcessor toLuminanceGrayscale(ImagePlus imp) {
+        return toLuminanceGrayscale(imp, true);
+    }
+
+    /**
+     * Converts {@code imp} to grayscale using the ITU-R BT.709 luminance formula.
+     * Handles RGB, RGBA, 8-bit gray, and 16-bit gray input.
+     *
+     * <p><b>Why {@code linearise} is a parameter and not a constant.</b> Photometric
+     * linearity and background-model fidelity want opposite things, and the pipeline
+     * needs both images:
+     * <ul>
+     *   <li><b>{@code true} (linear light)</b> is physically correct for
+     *       <i>quantification</i>: an integration value is only proportional to the
+     *       amount of analyte if the pixel values are proportional to light intensity.
+     *       Summing gamma-encoded values measures the wrong quantity, and the error
+     *       grows across a wide concentration range.</li>
+     *   <li><b>{@code false} (raw sRGB)</b> is what Stage 3's quartic background model
+     *       needs. The illumination gradient of a UV lamp is well approximated by a
+     *       15-coefficient quartic in the encoded space; after the sRGB inverse
+     *       transfer function (a 2.4 power) it is no longer quartic-shaped, and the
+     *       fit leaves a residual gradient across the plate. That residual raises the
+     *       detection threshold on the dim side of the plate and shrinks the spot
+     *       regions there — and because {@link SpotIntegrator} sums the top 15% of
+     *       pixels <i>within</i> each region, region area then carries the
+     *       concentration signal backwards.</li>
+     * </ul>
+     *
+     * <p>Measured on the three TLCyzer reference plates (2026-09-01): linearising
+     * everywhere gives pooled LOO recovery 97.56% / RSD 12.67% and needs a hand-picked
+     * threshold per plate; detecting on raw sRGB while integrating on linear light
+     * gives 100.77% / 6.33% with a single threshold of 1.0 for every plate and 5/5
+     * spots auto-detected on all three. See CLAUDE.md, "Colour space".
+     *
+     * @param linearise whether to apply the sRGB inverse transfer function
+     */
+    public static FloatProcessor toLuminanceGrayscale(ImagePlus imp, boolean linearise) {
         ImageProcessor ip = resolveProcessor(imp);
 
         if (ip instanceof ColorProcessor) {
-            return rgbToLuminance((ColorProcessor) ip);
+            return rgbToLuminance((ColorProcessor) ip, linearise);
         }
 
         // Already grayscale — just convert to float
@@ -70,11 +108,23 @@ public final class ImagePreparation {
     }
 
     /**
+     * Extracts the green channel from a colour image, linearising sRGB first.
+     * Equivalent to {@code extractGreenChannel(imp, true)}.
+     */
+    public static FloatProcessor extractGreenChannel(ImagePlus imp) {
+        return extractGreenChannel(imp, true);
+    }
+
+    /**
      * Extracts the green channel from a colour image.
      * For grayscale input, returns a copy of the image.
      * Validated for UV-fluorescence TLC images (Anton et al. 2023).
+     *
+     * @param linearise whether to apply the sRGB inverse transfer function; see
+     *                  {@link #toLuminanceGrayscale(ImagePlus, boolean)} for why the
+     *                  detection and integration paths want different answers
      */
-    public static FloatProcessor extractGreenChannel(ImagePlus imp) {
+    public static FloatProcessor extractGreenChannel(ImagePlus imp, boolean linearise) {
         ImageProcessor ip = resolveProcessor(imp);
 
         if (!(ip instanceof ColorProcessor)) {
@@ -91,7 +141,7 @@ public final class ImagePreparation {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 cp.getPixel(x, y, rgb);
-                out[y * width + x] = SRGB_TO_LINEAR[rgb[1]];
+                out[y * width + x] = linearise ? SRGB_TO_LINEAR[rgb[1]] : rgb[1];
             }
         }
 
@@ -122,7 +172,7 @@ public final class ImagePreparation {
         return ip;
     }
 
-    private static FloatProcessor rgbToLuminance(ColorProcessor cp) {
+    private static FloatProcessor rgbToLuminance(ColorProcessor cp, boolean linearise) {
         int width = cp.getWidth();
         int height = cp.getHeight();
         float[] out = new float[width * height];
@@ -131,9 +181,9 @@ public final class ImagePreparation {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 cp.getPixel(x, y, rgb);
-                float r = SRGB_TO_LINEAR[rgb[0]];
-                float g = SRGB_TO_LINEAR[rgb[1]];
-                float b = SRGB_TO_LINEAR[rgb[2]];
+                float r = linearise ? SRGB_TO_LINEAR[rgb[0]] : rgb[0];
+                float g = linearise ? SRGB_TO_LINEAR[rgb[1]] : rgb[1];
+                float b = linearise ? SRGB_TO_LINEAR[rgb[2]] : rgb[2];
                 out[y * width + x] = 0.2126f * r + 0.7152f * g + 0.0722f * b;
             }
         }
