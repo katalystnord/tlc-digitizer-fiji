@@ -309,7 +309,7 @@
        it to the article column would shrink the wizard's body copy past legibility. -->
   <div class="hero-shot">
     <img src="images/hero-workbench.png" loading="eager"
-         alt="TLC Digitizer running in Fiji: the plate image window on the left showing eight detected spots circled and numbered on a UV254 plate, and on the right the ImageJ toolbar, the wizard's Step 5 Spots panel with its four detection methods, and the Log window recording each analysis step.">
+         alt="TLC Digitizer running in Fiji: on the left the plate image window showing five detected spots circled and numbered on a UV254 dexamethasone plate, and on the right the wizard's Step 5 Spots panel with its four detection methods and the Log window recording each analysis step.">
   </div>
 </div>
 
@@ -331,7 +331,7 @@
           <p>Convert the raw photo to greyscale — luminance, or green-channel for UV-fluorescence plates like this one.</p>
         </div>
         <img src="images/walkthrough-1-image.png" loading="lazy"
-             alt="The original raw smartphone photo of the UV254 plate, greenish fluorescence, before any processing.">
+             alt="The original photograph of the UV254 dexamethasone plate, green fluorescence, before any processing.">
       </div>
       <div class="walk-row">
         <div>
@@ -340,7 +340,7 @@
           <p>Corners are auto-detected via Hough line detection and shown as draggable handles for manual correction.</p>
         </div>
         <img src="images/walkthrough-2-perspective.png" loading="lazy"
-             alt="The raw tilted photo with four red draggable corner handles (TL, TR, BL, BR) outlining the plate.">
+             alt="The photograph with four red draggable corner handles labelled TL, TR, BL and BR outlining the plate.">
       </div>
       <div class="walk-row">
         <div>
@@ -349,7 +349,7 @@
           <p>Quartic polynomial, white top-hat, or Savitzky-Golay correction flattens uneven illumination.</p>
         </div>
         <img src="images/walkthrough-3-background.png" loading="lazy"
-             alt="The rectified, background-corrected plate image, illumination flattened.">
+             alt="The rectified plate image after quartic background correction, with the illumination gradient flattened.">
       </div>
       <div class="walk-row">
         <div>
@@ -358,16 +358,16 @@
           <p>Mark the origin (red) and solvent front (blue) — every spot's Rf is computed relative to these two lines.</p>
         </div>
         <img src="images/walkthrough-4-rflines.png" loading="lazy"
-             alt="The corrected plate image with a red origin line and a blue solvent-front line marked near the top and bottom.">
+             alt="The corrected plate image with a red origin line near the bottom and a blue solvent-front line near the top.">
       </div>
       <div class="walk-row">
         <div>
           <div class="n">STEP 5</div>
           <h3>Spots</h3>
-          <p>Auto-detect, then confirm or adjust — all 8 spots found here, including both tailing streaks and a faint floating spot.</p>
+          <p>Auto-detect, then confirm or adjust. Five spots found here at the default threshold; any missed spot can be added with a click, and a false positive removed with Ctrl+click.</p>
         </div>
         <img src="images/walkthrough-5-spots.png" loading="lazy"
-             alt="The plate image with eight detected spots circled and numbered, including both tailing streaks and a faint floating spot.">
+             alt="The plate image with five detected spots circled and numbered in a row across the five lanes.">
       </div>
       <div class="walk-row">
         <div>
@@ -407,12 +407,11 @@
     <h2>Detection methods</h2>
     <p class="section-lede">
       Step 5 offers four strategies as a single-choice option. Legacy is the default and the
-      only method currently validated against reference plates — the rest are opt-in and
-      explicitly labelled beta in the UI.
+      most tested; the rest are opt-in and explicitly labelled beta in the UI.
     </p>
     <div class="cards">
       <div class="card">
-        <h3>Legacy (mean threshold) <span class="badge badge-validated">Validated</span></h3>
+        <h3>Legacy (mean threshold) <span class="badge badge-validated">Default</span></h3>
         <p>Fixed circular ROI from mean-threshold connected components. Recommended default.</p>
       </div>
       <div class="card">
@@ -433,26 +432,24 @@
 
 <section id="validation">
   <div class="wrap">
-    <h2>Validation</h2>
+    <h2>Validation status</h2>
     <p class="section-lede">
-      Leave-one-out recovery and RSD against the three supplementary reference plates from the
-      TLCyzer paper (legacy detection, n = 15 spots total).
+      Being honest about where this stands: the plugin ships a headless leave-one-out
+      recovery harness, a synthetic-plate suite with exactly known ground truth, and
+      regression fixtures pinning detection geometry on a real photograph. What it does not
+      yet have is a corpus large enough to make a performance claim worth stating.
     </p>
-    <table>
-      <thead><tr><th>Plate</th><th class="num">Mean recovery</th><th class="num">RSD</th><th>Background method</th></tr></thead>
-      <tbody>
-        <tr><td>MOESM2</td><td class="num">100.86%</td><td class="num">7.34%</td><td>Polynomial, threshold 1.0</td></tr>
-        <tr><td>MOESM3 (HCT)</td><td class="num">98.96%</td><td class="num">5.74%</td><td>Polynomial, threshold 1.0</td></tr>
-        <tr><td>MOESM4 (SMX)</td><td class="num">102.49%</td><td class="num">6.73%</td><td>Polynomial, threshold 1.0</td></tr>
-        <tr class="total"><td>Overall (n = 15)</td><td class="num">100.77%</td><td class="num">6.33%</td><td>—</td></tr>
-      </tbody>
-    </table>
-    <p class="section-lede" style="margin-top:18px;">
-      All three plates run at identical settings — no per-plate tuning. Note this is a
-      leave-one-out recovery RSD across concentration levels, which is not the same quantity as
-      an ICH repeatability RSD (that requires replicate analyses). Three reference plates from a
-      single imaging setup is a small corpus; wider validation on independently collected plates
-      is in progress, and contributions of plates with known concentrations are welcome.
+    <p class="section-lede">
+      The reference plates available to us are the three supplementary images from the
+      TLCyzer paper — a single imaging setup, one compound each, fifteen spots in total.
+      Recent work also showed that quantification is measurably sensitive to how the plate
+      corners are placed, which means any figure quoted from one corner set would overstate
+      how reproducible it is between analysts.
+    </p>
+    <p class="section-lede">
+      A wider validation study on independently collected plates is what comes next, and
+      numbers will appear here when they mean something. If you have TLC plates with known
+      concentrations and would be willing to share images, we would like to hear from you.
     </p>
   </div>
 </section>
@@ -462,7 +459,7 @@
     <h2>Installation</h2>
     <div class="install-grid">
       <div class="install-card">
-        <h3>Option A — Fiji update site <em style="font-weight:400;color:var(--ink-faint)">(recommended, once published)</em></h3>
+        <h3>Option A — Fiji update site <em style="font-weight:400;color:var(--ink-faint)">(not published yet)</em></h3>
         <ol>
           <li>Open Fiji</li>
           <li><strong>Help → Update → Manage Update Sites</strong></li>
@@ -471,10 +468,10 @@
         </ol>
       </div>
       <div class="install-card">
-        <h3>Option B — Manual JAR install</h3>
+        <h3>Option B — Build from source <em style="font-weight:400;color:var(--ink-faint)">(the way to run it today)</em></h3>
         <ol>
-          <li>Download <code>tlc-digitizer-X.Y.Z.jar</code> from GitHub Releases</li>
-          <li>Copy it into your Fiji <code>plugins/</code> folder</li>
+          <li>Clone the repository and run <code>./mvnw package</code></li>
+          <li>Copy <code>target/tlc-digitizer-*.jar</code> into your Fiji <code>plugins/</code> folder</li>
           <li>Restart Fiji</li>
         </ol>
       </div>
@@ -490,7 +487,7 @@ cd tlc-digitizer-fiji
   <div class="wrap">
     <h2>Scientific provenance</h2>
     <ul class="refs">
-      <li><span class="who">Hauk C et al.</span> — <em>Scientific Reports</em> 12, 13433 (2022). TLCyzer, the primary algorithm source. <a href="https://doi.org/10.1038/s41598-022-17527-y">doi:10.1038/s41598-022-17527-y</a></li>
+      <li><span class="who">Hauk C et al.</span> — <em>Scientific Reports</em> 12, 13433 (2022). TLCyzer, the primary algorithm source. The dexamethasone plate shown throughout this page is the supplementary reference image from that paper, so the analysis here can be compared directly against theirs. <a href="https://doi.org/10.1038/s41598-022-17527-y">doi:10.1038/s41598-022-17527-y</a></li>
       <li><span class="who">Mac Fhionnlaoich N et al.</span> — <em>J. Chem. Educ.</em> 95, 2191 (2018). qTLC: 2D area integration, on-plate calibration.</li>
       <li><span class="who">Fichou D & Morlock G.</span> — <em>J. Chromatogr. A</em> 1560, 78 (2018). quanTLC: videodensitometry validated against CAMAG slit scanning.</li>
       <li><span class="who">Pavicevic A et al.</span> — <em>J. Pharm. Biomed. Anal.</em> 129, 43 (2016). qtlc: Savitzky-Golay noise estimation, flatbed workflow.</li>

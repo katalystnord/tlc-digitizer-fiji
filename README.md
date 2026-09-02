@@ -144,21 +144,16 @@ Two additional, larger-scale test tiers:
   ```sh
   ./mvnw test -Dtest=ValidationTest -Dvalidation.data.dir=/path/to/tlcyzer-paper
   ```
-  Current benchmark (legacy detection): overall n=15, mean recovery 100.77%, RSD 6.33% — inside the
-  TLCyzer paper's own 96.8–103.9% recovery band. Every plate uses the same settings: polynomial
-  background and the plain image mean as the detection threshold. See the fixture JSONs under
-  `validation/tlcyzer-paper/`.
+  Validation status, stated plainly: the reference plates available to us are the three
+  supplementary images from the TLCyzer paper — a single imaging setup, one compound each,
+  fifteen spots in total. That is enough to catch regressions, and not enough to support a
+  performance claim. Quantification is also measurably sensitive to how the plate corners are
+  placed, so any figure quoted from one corner set would overstate its reproducibility between
+  analysts. A wider study on independently collected plates is the next step; numbers will go
+  here when they mean something.
 
-  | Plate | Mean recovery | RSD | Spots auto-detected |
-  |-------|----------------|-----|----------------------|
-  | MOESM2 | 100.86% | 7.34% | 5 / 5 |
-  | MOESM3 (HCT) | 98.96% | 5.74% | 5 / 5 |
-  | MOESM4 (SMX) | 102.49% | 6.73% | 5 / 5 |
-  | **Overall (n=15)** | **100.77%** | **6.33%** | |
-
-  This is a leave-one-out recovery RSD across concentration levels, which is **not** the same
-  quantity as the ICH repeatability RSD quoted in the targets table above (that needs replicate
-  analyses, which three photographs cannot provide). The two are not directly comparable.
+  If you have TLC plates with known concentrations and would be willing to share images, please
+  get in touch.
 
 ---
 
