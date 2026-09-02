@@ -93,27 +93,28 @@ public final class CsvExporter {
         } else {
             pw.println("# Calibration model: " + cal.modelType.name());
             pw.println("# Calibration summary: " + cal.toSummary());
-            pw.println("# R_squared: " + cal.rSquared);
-            pw.println("# RMSE_concentration: " + cal.rmse);
+            pw.println("# R_squared: " + Precision.significant(cal.rSquared, 4));
+            pw.println("# RMSE_concentration: " + Precision.significant(cal.rmse, 3));
             pw.println("# n_calibration_points: " + cal.nPoints);
             switch (cal.modelType) {
                 case LINEAR:
-                    pw.println("# slope: " + cal.slope);
-                    pw.println("# intercept: " + cal.intercept);
-                    pw.println("# LOD: " + cal.lod);
-                    pw.println("# LOQ: " + cal.loq);
+                    // slope/intercept reproduce the model, so they keep every digit.
+                    pw.println("# slope: " + Precision.exact(cal.slope));
+                    pw.println("# intercept: " + Precision.exact(cal.intercept));
+                    pw.println("# LOD: " + Precision.concentration(cal.lod, cal.rmse));
+                    pw.println("# LOQ: " + Precision.concentration(cal.loq, cal.rmse));
                     pw.println("# LOD_LOQ_convention: " + cal.lodLoqConvention.name());
                     break;
                 case LOG_LOG:
-                    pw.println("# exponent: " + cal.coefficients[1]);
-                    pw.println("# prefactor: " + Math.exp(cal.coefficients[0]));
+                    pw.println("# exponent: " + Precision.exact(cal.coefficients[1]));
+                    pw.println("# prefactor: " + Precision.exact(Math.exp(cal.coefficients[0])));
                     pw.println("# LOD: NA (log-log model — compute from residuals manually)");
                     pw.println("# LOQ: NA (log-log model — compute from residuals manually)");
                     break;
                 case QUADRATIC:
-                    pw.println("# a2: " + cal.coefficients[2]);
-                    pw.println("# a1: " + cal.coefficients[1]);
-                    pw.println("# a0: " + cal.coefficients[0]);
+                    pw.println("# a2: " + Precision.exact(cal.coefficients[2]));
+                    pw.println("# a1: " + Precision.exact(cal.coefficients[1]));
+                    pw.println("# a0: " + Precision.exact(cal.coefficients[0]));
                     pw.println("# LOD: NA (quadratic model — compute from residuals manually)");
                     pw.println("# LOQ: NA (quadratic model — compute from residuals manually)");
                     break;
@@ -131,19 +132,23 @@ public final class CsvExporter {
                    "radius_fraction,integration_value,integration_pixel_count,assigned_concentration," +
                    "is_reference,reference_concentration");
 
+        // Concentrations are resolved by the calibration's own residual scatter, so a
+        // loose fit prints fewer digits than a tight one. See Precision.
+        double rmse = (state.calibrationModel != null) ? state.calibrationModel.rmse : Double.NaN;
+
         for (Spot s : spots) {
-            pw.printf("%d,%d,%s,%.6f,%.6f,%.6f,%s,%d,%s,%b,%s%n",
+            pw.printf("%d,%d,%s,%s,%s,%s,%s,%d,%s,%b,%s%n",
                 s.id,
                 s.lane,
-                formatDouble(s.rfValue),
-                s.centroidX / imageWidth,
-                s.centroidY / imageHeight,
-                s.radius / Math.max(imageWidth, imageHeight),
-                formatDouble(s.integrationValue),
+                Precision.rf(s.rfValue),
+                Precision.geometry(s.centroidX / (double) imageWidth),
+                Precision.geometry(s.centroidY / (double) imageHeight),
+                Precision.geometry(s.radius / (double) Math.max(imageWidth, imageHeight)),
+                Precision.integration(s.integrationValue),
                 s.integrationPixelCount,
-                formatDouble(s.assignedConcentration),
+                Precision.concentration(s.assignedConcentration, rmse),
                 s.isReference,
-                formatDouble(s.referenceConcentration));
+                Precision.asEntered(s.referenceConcentration));
         }
     }
 

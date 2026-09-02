@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TLC Digitizer — quantitative TLC analysis for Fiji</title>
-<meta name="description" content="A Fiji/ImageJ plugin that turns a single photo of a developed TLC plate into Rf values, integrated spot intensities, and calibration-derived concentrations.">
+<meta name="description" content="A Fiji/ImageJ plugin for quantitative analysis of thin-layer chromatography plates: Rf values, integrated spot intensities, and calibration-derived concentrations.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23163a35%22/><circle cx=%2211%22 cy=%2221%22 r=%224.5%22 fill=%22%2352c9ad%22/><circle cx=%2221%22 cy=%2213%22 r=%223.2%22 fill=%22%23e8b64f%22/></svg>">
 <style>
   :root{
@@ -293,9 +293,9 @@
   <span class="plate-mark origin" aria-hidden="true">origin · R<sub>f</sub> 0.0</span>
   <div class="wrap">
     <span class="kicker">Fiji / ImageJ plugin · GPL-3.0</span>
-    <h1>Quantitative TLC analysis from a single photograph.</h1>
+    <h1>Quantitative TLC analysis.</h1>
     <p class="lede">
-      TLC Digitizer takes one photo of a developed thin-layer chromatography plate —
+      TLC Digitizer reads a photograph of a developed thin-layer chromatography plate —
       smartphone or flatbed scanner — and returns Rf values, integrated spot intensities,
       and calibration-derived concentrations, with every analysis parameter logged to a
       reproducible CSV.
@@ -317,8 +317,8 @@
   <div class="wrap">
     <h2>How it works</h2>
     <p class="section-lede">
-      The wizard, step by step — run here on a real, off-axis smartphone photo of a UV254 plate
-      with two tailing/streaking lanes, one of the harder cases in the project's test corpus.
+      The wizard, step by step — run here on the UV254 dexamethasone reference plate published
+      with the TLCyzer paper, so the analysis shown can be compared against theirs.
       Directly derived from the peer-reviewed
       <a href="https://doi.org/10.1038/s41598-022-17527-y">TLCyzer algorithm</a>
       (Hauk et al., <em>Scientific Reports</em> 2022), with additions from the qTLC and qtlc literature.
@@ -432,24 +432,37 @@
 
 <section id="validation">
   <div class="wrap">
-    <h2>Validation status</h2>
+    <h2>Validation</h2>
     <p class="section-lede">
-      Being honest about where this stands: the plugin ships a headless leave-one-out
-      recovery harness, a synthetic-plate suite with exactly known ground truth, and
-      regression fixtures pinning detection geometry on a real photograph. What it does not
-      yet have is a corpus large enough to make a performance claim worth stating.
+      Validation here is treated as an ongoing programme with published gates, not a box that
+      gets ticked once. Releases are numbered by evidence rather than features: the analysis
+      pipeline is already complete, so what stands between this and a 1.0 is what we can
+      demonstrate about it. The <a href="https://github.com/katalystnord/tlc-digitizer-fiji/blob/master/ROADMAP.md">roadmap</a>
+      states each gate, written so that it can fail.
     </p>
     <p class="section-lede">
-      The reference plates available to us are the three supplementary images from the
-      TLCyzer paper — a single imaging setup, one compound each, fifteen spots in total.
-      Recent work also showed that quantification is measurably sensitive to how the plate
-      corners are placed, which means any figure quoted from one corner set would overstate
-      how reproducible it is between analysts.
+      Three kinds of data feed that, because each answers a different question.
+      <strong>Synthetic plates</strong>, generated in code, give exactly known ground truth,
+      so detection is scored against a target rather than an opinion. <strong>Real plate
+      photographs</strong> act as regression fixtures against the sensor noise, uneven
+      lighting and off-axis framing that synthetic data cannot reproduce; these come from our
+      own bench and from other labs, and the corpus grows as people contribute.
+      <strong>Plates with certified analyte concentrations</strong> are what quantification
+      accuracy actually rests on, and they are the scarce input everywhere in this field —
+      which is why the next milestone is about widening that set rather than polishing
+      numbers on the current one.
     </p>
     <p class="section-lede">
-      A wider validation study on independently collected plates is what comes next, and
-      numbers will appear here when they mean something. If you have TLC plates with known
-      concentrations and would be willing to share images, we would like to hear from you.
+      Two things we would rather say than have you discover. Any accuracy figure derived from
+      a handful of plates measured in one laboratory says more about those plates than about
+      the method. And we have measured that quantification is sensitive to how the plate
+      corners are placed, so a figure quoted from a single placement would overstate its
+      reproducibility between analysts. Numbers will appear here when they carry weight.
+    </p>
+    <p class="section-lede">
+      If you run TLC with reference standards and would be willing to share plate images, that
+      is the single most useful thing anyone can contribute. Replicates of one compound are
+      worth more than variety.
     </p>
   </div>
 </section>
@@ -485,14 +498,18 @@ cd tlc-digitizer-fiji
 
 <section id="references">
   <div class="wrap">
-    <h2>Scientific provenance</h2>
+    <h2>References</h2>
     <ul class="refs">
-      <li><span class="who">Hauk C et al.</span> — <em>Scientific Reports</em> 12, 13433 (2022). TLCyzer, the primary algorithm source. The dexamethasone plate shown throughout this page is the supplementary reference image from that paper, so the analysis here can be compared directly against theirs. <a href="https://doi.org/10.1038/s41598-022-17527-y">doi:10.1038/s41598-022-17527-y</a></li>
-      <li><span class="who">Mac Fhionnlaoich N et al.</span> — <em>J. Chem. Educ.</em> 95, 2191 (2018). qTLC: 2D area integration, on-plate calibration.</li>
-      <li><span class="who">Fichou D & Morlock G.</span> — <em>J. Chromatogr. A</em> 1560, 78 (2018). quanTLC: videodensitometry validated against CAMAG slit scanning.</li>
-      <li><span class="who">Pavicevic A et al.</span> — <em>J. Pharm. Biomed. Anal.</em> 129, 43 (2016). qtlc: Savitzky-Golay noise estimation, flatbed workflow.</li>
-      <li><span class="who">Anton A et al.</span> — <em>JPC</em> 36, 257 (2023). JPEG outperforms TIFF/RAW; green-channel extraction for UV fluorescence.</li>
+      <li>Anton, C.-J., Ecker, F. and Braun-Münker, M. (2023) &lsquo;Thin-layer chromatography quantification of ibuprofen using digital imaging&rsquo;, <em>JPC &ndash; Journal of Planar Chromatography &ndash; Modern TLC</em>, 36, pp. 257&ndash;263. <a href="https://doi.org/10.1007/s00764-023-00255-y">doi:10.1007/s00764-023-00255-y</a></li>
+      <li>Fichou, D. and Morlock, G.E. (2018) &lsquo;quanTLC, an online open-source solution for videodensitometric quantification&rsquo;, <em>Journal of Chromatography A</em>, 1560, pp. 78&ndash;83.</li>
+      <li>Hauk, C., Boss, M., Gabel, J., Rottstegge, M., Trost, O., Frech, F., Becker, K. and Heide, L. (2022) &lsquo;An open-source smartphone app for the quantitative evaluation of thin-layer chromatographic analyses in medicine quality screening&rsquo;, <em>Scientific Reports</em>, 12, 13433. <a href="https://doi.org/10.1038/s41598-022-17527-y">doi:10.1038/s41598-022-17527-y</a></li>
+      <li>Mac Fhionnlaoich, N., Cattoz, B., Goddard, M., Robb, I., King, S.M., Clough, A.S. and Griffiths, P.C. (2018) &lsquo;A toolkit to quantify target compounds in thin layer chromatography experiments&rsquo;, <em>Journal of Chemical Education</em>, 95, pp. 2191&ndash;2196. <a href="https://doi.org/10.1021/acs.jchemed.8b00175">doi:10.1021/acs.jchemed.8b00175</a></li>
+      <li>Pavićević, I.D., Jovanović, V.B., Takić, M.M., Aćimović, J.M., Penezić, A.Z. and Mandić, L.M. (2016) &lsquo;Quantification of total content of non-esterified fatty acids bound to human serum albumin&rsquo;, <em>Journal of Pharmaceutical and Biomedical Analysis</em>, 129, pp. 43&ndash;49. <a href="https://doi.org/10.1016/j.jpba.2016.06.043">doi:10.1016/j.jpba.2016.06.043</a></li>
     </ul>
+    <p class="section-lede" style="margin-top:18px;">
+      The dexamethasone plate shown throughout this page is the supplementary reference image
+      from Hauk <em>et al.</em> (2022).
+    </p>
   </div>
 </section>
 

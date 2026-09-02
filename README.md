@@ -2,7 +2,7 @@
 
 A Fiji/ImageJ plugin for quantitative analysis of thin-layer chromatography plate images.
 
-Takes a single photograph of a developed TLC plate — from a smartphone or flatbed scanner — and returns Rf values, integrated spot intensities, and calibration-derived concentrations in a reproducible CSV export.
+Takes a photograph of a developed TLC plate — from a smartphone or flatbed scanner — and returns Rf values, integrated spot intensities, and calibration-derived concentrations in a reproducible CSV export.
 
 ---
 
@@ -144,8 +144,11 @@ Two additional, larger-scale test tiers:
   ```sh
   ./mvnw test -Dtest=ValidationTest -Dvalidation.data.dir=/path/to/tlcyzer-paper
   ```
-  Validation status, stated plainly: the reference plates available to us are the three
-  supplementary images from the TLCyzer paper — a single imaging setup, one compound each,
+  Validation status, stated plainly: testing runs on synthetic plates with exactly known
+  ground truth, on real plate photographs from our own bench and other labs used as
+  regression fixtures, and — for quantification specifically — on plates with known analyte
+  concentrations. That last category is the scarce one: at present it is the three
+  supplementary images from the TLCyzer paper, a single imaging setup, one compound each,
   fifteen spots in total. That is enough to catch regressions, and not enough to support a
   performance claim. Quantification is also measurably sensitive to how the plate corners are
   placed, so any figure quoted from one corner set would overstate its reproducibility between
