@@ -155,6 +155,8 @@ Two additional, larger-scale test tiers:
   If you have TLC plates with known concentrations and would be willing to share images, please
   get in touch.
 
+  See [ROADMAP.md](ROADMAP.md) for the evidence gates between here and a 1.0.
+
 ---
 
 ## Project structure
