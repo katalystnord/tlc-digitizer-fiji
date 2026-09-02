@@ -481,15 +481,16 @@
         </ol>
       </div>
       <div class="install-card">
-        <h3>Option B — Build from source <em style="font-weight:400;color:var(--ink-faint)">(the way to run it today)</em></h3>
+        <h3>Option B — Download the JAR <em style="font-weight:400;color:var(--ink-faint)">(the way to run it today)</em></h3>
         <ol>
-          <li>Clone the repository and run <code>./mvnw package</code></li>
-          <li>Copy <code>target/tlc-digitizer-*.jar</code> into your Fiji <code>plugins/</code> folder</li>
+          <li>Download <code>tlc-digitizer-0.7.0.jar</code> from
+              <a href="https://github.com/katalystnord/tlc-digitizer-fiji/releases/latest">GitHub Releases</a></li>
+          <li>Copy it into your Fiji <code>plugins/</code> folder</li>
           <li>Restart Fiji</li>
         </ol>
       </div>
     </div>
-    <p class="section-lede" style="margin-top:20px;">Runs as <strong>Plugins → TLC → TLC Digitizer</strong>. Build from source:</p>
+    <p class="section-lede" style="margin-top:20px;">Runs as <strong>Plugins → TLC → TLC Digitizer</strong>. Or build from source:</p>
     <pre><code>git clone https://github.com/katalystnord/tlc-digitizer-fiji.git
 cd tlc-digitizer-fiji
 ./mvnw package</code></pre>
